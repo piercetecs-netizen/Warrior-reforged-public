@@ -17,7 +17,6 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
-
 /* ============================================================
    WARRIORS & ADVENTURE — REFORGED v3
    A personal idle RPG. No ads. No paywalls. No tracking.
@@ -76,6 +75,28 @@ const capNote = {
   crit: "hard cap 100% — every point above is wasted",
   def: "softens sharply past ~400 (mitigation flattens)",
 };
+
+/* the four elements. Cycle of dominance: fire scorches earth, earth grounds
+   storm, storm rides the water, water douses fire. Strong hits ×1.3; striking
+   into your counter ×0.75. Neutral damage ignores the wheel entirely. */
+const ELEMENTS = {
+  fire: { name: "Fire", glyph: "火", color: "#e0562f", beats: "earth" },
+  earth: { name: "Earth", glyph: "土", color: "#b08d4f", beats: "storm" },
+  storm: { name: "Storm", glyph: "雷", color: "#6c8fc4", beats: "water" },
+  water: { name: "Water", glyph: "水", color: "#5fa8c8", beats: "fire" },
+};
+const EL_KEYS = Object.keys(ELEMENTS);
+const cycleMult = (atkEl, defEl) =>
+  !atkEl || !defEl ? 1 : ELEMENTS[atkEl].beats === defEl ? 1.3 : ELEMENTS[defEl].beats === atkEl ? 0.75 : 1;
+/* a foe's resistance guards only its OWN element; menace sets the strength */
+const foeElemMod = (el, f) => {
+  if (!el) return 1;
+  let m = cycleMult(el, f.el);
+  if (f.el === el) m *= 1 - (f.elRes || 0);
+  return m;
+};
+const BOSS_EL = ["earth", "water", "fire", "storm", "earth", "fire", "water", "storm", "fire", "earth", "water", "storm"];
+const SKILL_EL = { fireball: "fire", meteor: "fire", soulflame: "fire", hex: "fire", flamestrike: "fire", cindershot: "fire", iceshard: "water", frostnova: "water", tidal: "water", thunder: "storm", stormcall: "storm", chainlight: "storm", quake: "earth", shatter: "earth" };
 
 const C = {
   ink: "#14161d", panel: "#1d212b", panel2: "#232837", line: "#323949",
@@ -145,6 +166,10 @@ const CLASS_MASTERY = {
   druid: ["staff", "fist"],
   necromancer: ["staff", "whisk"],
   spellblade: ["sword", "saber", "staff"],
+  ravager: ["greatsword", "glaive", "fist"],
+  vowkeeper: ["whisk", "staff"],
+  chronomancer: ["whisk", "dagger"],
+  stormcaller: ["staff", "saber"],
 };
 const isTwoH = (it) => !!(it && it.wtype && WEAPON_TYPES[it.wtype] && WEAPON_TYPES[it.wtype].hands === 2);
 const masteryOf = (g, it) => !!(it && it.wtype && (CLASS_MASTERY[g.cls] || []).includes(it.wtype));
@@ -187,7 +212,7 @@ const CLASSES = {
     name: "Beastcaller", seal: "兽", color: C.violet,
     hp: 105, hpL: 19, atk: 11, atkL: 2.6, def: 3, defL: 0.7, crit: 7,
     blurb: "Never hunts alone.",
-    passive: "Passive: your spirit beast strikes beside you (30% ATK, evolving with level) and you weave one extra skill.",
+    passive: "Passive: your spirit beast carries 35% of your ATK as its own strikes and 45% of your HP as its body (your own strikes ease to 75% to pay for it). It can hold the front line — and it can fall. You weave one extra skill.",
   },
   monk: {
     name: "Monk", seal: "拳", color: "#e08a4f",
@@ -229,7 +254,7 @@ const CLASSES = {
     name: "Cleric", seal: "僧", color: "#e0d08a",
     hp: 100, hpL: 18, atk: 11, atkL: 2.6, def: 4, defL: 0.75, crit: 7,
     blurb: "Mercy is a discipline, not a weakness.",
-    passive: "Passive: blessed — all your healing is 40% stronger.",
+    passive: "Passive: the Votive Guardian fights for you — it bears 85% of your ATK and 55% of your HP while your own hand softens to 35% ATK, 85% DEF. Your healing is 40% stronger and mends the Guardian too.",
   },
   samurai: {
     name: "Samurai", seal: "侍", color: "#c85f5f",
@@ -255,6 +280,30 @@ const CLASSES = {
     blurb: "Steel and sorcery, sworn as one.",
     passive: "Passive: arcane edge — every 3rd strike detonates for +120% bonus arcane damage.",
   },
+  ravager: {
+    name: "Ravager", seal: "怒", color: "#d14b2f",
+    hp: 112, hpL: 21, atk: 13, atkL: 3.0, def: 3, defL: 0.55, crit: 7,
+    blurb: "No patience. Only hunger.",
+    passive: "Passive: RAGE instead of cooldowns — striking builds it (+6), bleeding builds it faster (+8), kills feed it (+12). Skills cost rage and cast the instant it's paid.",
+  },
+  vowkeeper: {
+    name: "Vowkeeper", seal: "誓", color: "#d8c9a0",
+    hp: 135, hpL: 25, atk: 9, atkL: 2.2, def: 5, defL: 1.0, crit: 4,
+    blurb: "Raises no hand — and needs none.",
+    passive: "Passive: the Vow — you never strike. Every blow you suffer erupts back as a shockwave to ALL foes (120% of the harm + 35% ATK). Aggression digs its own grave.",
+  },
+  chronomancer: {
+    name: "Chronomancer", seal: "时", color: "#8fb5c8",
+    hp: 92, hpL: 17, atk: 12, atkL: 2.8, def: 3, defL: 0.6, crit: 9,
+    blurb: "Borrows tomorrow, repays never.",
+    passive: "Passive: time flows kindly — cooldowns recover 50% faster, and every 4th tick you act twice.",
+  },
+  stormcaller: {
+    name: "Stormcaller", seal: "霹", color: "#7aa2d8",
+    hp: 88, hpL: 16, atk: 12, atkL: 2.9, def: 3, defL: 0.5, crit: 13,
+    blurb: "The sky answers to no one — almost.",
+    passive: "Passive: every critical strike arcs storm lightning to ALL other foes for 35% ATK.",
+  },
 };
 
 /* bloodlines: who you were born as */
@@ -275,6 +324,10 @@ const RACES = {
   starborn: { name: "Starborn", seal: "星", color: "#b0a0e0", blurb: "Old light, patient and vast.", mods: { xp: 1.12, crit: 2 }, modText: "+12% XP · +2% CRIT · fated: Echoes are earned 20% faster on reincarnation" },
   bloodkin: { name: "Bloodkin", seal: "血", color: "#b53545", blurb: "The hunger is old and honest.", mods: { atk: 1.13, hp: 0.94, crit: 1 }, modText: "+13% ATK · +1% CRIT · −6% HP · sanguine: 10% on hit to drink 2% max HP" },
   voidborn: { name: "Voidborn", seal: "虚", color: "#7a6fb0", blurb: "Born of the space between stars.", mods: { atk: 1.08, crit: 4, hp: 0.96 }, modText: "+8% ATK · +4% CRIT · −4% HP · unmaking: +10% damage to every foe in a pack" },
+  ashborn: { name: "Ashborn", seal: "烬", color: "#e0562f", blurb: "The pyre remembers its children.", mods: { atk: 1.06 }, modText: "+6% ATK · fire resist 25% · ember: +10% of every strike burns as FIRE" },
+  deepborn: { name: "Deepborn", seal: "渊", color: "#5fa8c8", blurb: "Pressure is just an embrace.", mods: { hp: 1.1 }, modText: "+10% HP · water resist 25% · stillwater: +1% HP regen at camp" },
+  stormtouched: { name: "Stormtouched", seal: "霆", color: "#7aa2d8", blurb: "Struck once, changed forever.", mods: { crit: 3 }, modText: "+3% CRIT · storm resist 25%" },
+  terraborn: { name: "Terraborn", seal: "岳", color: "#b08d4f", blurb: "The mountain claims its own.", mods: { def: 1.1 }, modText: "+10% DEF · earth resist 25%" },
 };
 
 /* past lives: who you were before the road */
@@ -293,10 +346,14 @@ const BACKGROUNDS = {
   pilgrim: { name: "Road Pilgrim", seal: "逓", blurb: "Raised with faith and blistered feet.", passive: "Rested XP bonus lasts 50% longer and grants +35% instead of +25%.", startGold: 30 },
   outcast: { name: "Branded Outcast", seal: "叛", blurb: "Raised with a mark and a grudge.", passive: "+6% ATK, but starts with no gold and no cushion.", startGold: 0 },
   veteran: { name: "Arena Veteran", seal: "鬥", blurb: "Raised on sand and the roar of crowds.", passive: "Kill streaks build gold 50% faster (bonus caps sooner).", startGold: 50 },
+  pyre: { name: "Pyre Tender", seal: "焚", blurb: "Raised feeding the eternal flame.", passive: "Fire resist 15% · starts with 5 Spirit Essence.", startGold: 20 },
+  tide: { name: "Tide Priest", seal: "潮", blurb: "Raised where the sea prays back.", passive: "Water resist 15% · rises from defeat 1 beat sooner.", startGold: 20 },
+  rod: { name: "Lightning Rod", seal: "引", blurb: "Raised on the tallest hill, on purpose.", passive: "Storm resist 15% · kills pay +5% gold.", startGold: 20 },
+  quarry: { name: "Quarry Child", seal: "采", blurb: "Raised swinging at stone.", passive: "Earth resist 15% · bosses yield +1 material.", startGold: 20 },
 };
 
 // aoe skills strike every foe in a pack
-const AOE = { cleave: true, meteor: true, whirlwind: true, chain: true, supernova: true, thunders5: true, mirrorblades: true, stampede: true, swarm: true, cyclone: true, fanknives: true, shieldwave: true, arrowstorm: true, rampage: true, shadowflame: true, holynova: true, windcut: true, thornburst: true, hurricane: true, bonestorm: true, cataclysm: true, apocalypse: true, avatar: true, spellcleave: true, spellstorm: true };
+const AOE = { cleave: true, meteor: true, whirlwind: true, chain: true, supernova: true, thunders5: true, mirrorblades: true, stampede: true, swarm: true, cyclone: true, fanknives: true, shieldwave: true, arrowstorm: true, rampage: true, shadowflame: true, holynova: true, windcut: true, thornburst: true, hurricane: true, bonestorm: true, cataclysm: true, apocalypse: true, avatar: true, spellcleave: true, spellstorm: true, carnage: true, ragequake: true, rebuke: true, finalvow: true, arcflash: true, tempest: true, skyfall: true };
 
 const SKILLS = [
   { id: "cleave", cls: "warrior", name: "Cleave", lv: 3, cd: 6, tt: 45, desc: "Strike every foe for 250% attack." },
@@ -381,7 +438,7 @@ const SKILLS = [
   { id: "blessing", cls: "cleric", name: "Blessing", lv: 15, cd: 16, tt: 150, desc: "Shield 25% max HP and +20% attack 5s." },
   { id: "holynova", cls: "cleric", name: "Holy Nova", lv: 25, cd: 12, tt: 240, desc: "260% to every foe and restore 12% max HP." },
   { id: "sanctuary", cls: "cleric", name: "Sanctuary", lv: 35, cd: 18, tt: 360, desc: "Shield 40% max HP and restore 15%." },
-  { id: "judgment2", cls: "cleric", name: "Judgment", lv: 55, cd: 14, tt: 600, desc: "Strike the front foe for 500% attack." },
+  { id: "communion", cls: "cleric", name: "Martyr's Communion", lv: 55, cd: 20, tt: 600, desc: "Only while your Guardian lies fallen: take its might into yourself \u2014 hero strikes surge to ~103% ATK for 8s, at the cost of 10% max HP." },
   { id: "resurrection", cls: "cleric", name: "Radiant Grace", lv: 75, cd: 24, tt: 900, desc: "Restore 60% max HP and shield 30%." },
   { id: "quickdraw", cls: "samurai", name: "Quick Draw", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 270% attack." },
   { id: "parrystance", cls: "samurai", name: "Parry Stance", lv: 8, cd: 13, tt: 90, desc: "Shield 22% max HP." },
@@ -411,6 +468,34 @@ const SKILLS = [
   { id: "arcanesurge", cls: "spellblade", name: "Arcane Surge", lv: 35, cd: 14, tt: 360, desc: "+30% attack and +15% crit for 6s." },
   { id: "blinkstrike", cls: "spellblade", name: "Blink Strike", lv: 55, cd: 12, tt: 600, desc: "450% attack — always critical." },
   { id: "spellstorm", cls: "spellblade", name: "Spellstorm", lv: 75, cd: 26, tt: 900, desc: "Strike every foe for 1000% attack." },
+  { id: "sunder", cls: "ravager", name: "Sunder", lv: 3, cd: 6, tt: 45, desc: "24 rage: strike the front foe for 300% attack." },
+  { id: "bloodroar", cls: "ravager", name: "Blood Roar", lv: 8, cd: 8, tt: 90, desc: "32 rage: +35% attack for 6s." },
+  { id: "skullsplit", cls: "ravager", name: "Skullsplitter", lv: 15, cd: 9, tt: 150, desc: "36 rage: 380% attack and stuns the front foe." },
+  { id: "carnage", cls: "ravager", name: "Carnage", lv: 25, cd: 11, tt: 240, desc: "44 rage: strike every foe for 330% attack." },
+  { id: "painfeast", cls: "ravager", name: "Pain Feast", lv: 35, cd: 10, tt: 360, desc: "40 rage: restore 18% max HP and +20% attack 5s." },
+  { id: "annihilate", cls: "ravager", name: "Annihilate", lv: 55, cd: 16, tt: 600, desc: "64 rage: strike the front foe for 1100% attack." },
+  { id: "ragequake", cls: "ravager", name: "Ragequake", lv: 75, cd: 22, tt: 900, desc: "88 rage: EARTH — strike every foe for 950% attack.", el: "earth" },
+  { id: "stillmind", cls: "vowkeeper", name: "Still Mind", lv: 3, cd: 10, tt: 45, desc: "Shield equal to 28% max HP." },
+  { id: "graceful", cls: "vowkeeper", name: "Graceful Mend", lv: 8, cd: 11, tt: 90, desc: "Restore 24% max HP." },
+  { id: "vowward", cls: "vowkeeper", name: "Ward of the Vow", lv: 15, cd: 16, tt: 150, desc: "For 6s your shockwaves strike 60% harder." },
+  { id: "patience", cls: "vowkeeper", name: "Patience", lv: 25, cd: 14, tt: 240, desc: "Chill all foes −30% attack 5s." },
+  { id: "rebuke", cls: "vowkeeper", name: "Silent Rebuke", lv: 35, cd: 13, tt: 360, desc: "EARTH — the ground answers: 320% to every foe.", el: "earth" },
+  { id: "sanctum", cls: "vowkeeper", name: "Sanctum", lv: 55, cd: 19, tt: 600, desc: "Shield 45% max HP and restore 15%." },
+  { id: "finalvow", cls: "vowkeeper", name: "The Final Vow", lv: 75, cd: 25, tt: 900, desc: "EARTH — 900% to every foe. The Vow holds.", el: "earth" },
+  { id: "timelash", cls: "chronomancer", name: "Time Lash", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 270% attack." },
+  { id: "hasteflow", cls: "chronomancer", name: "Hasteflow", lv: 8, cd: 14, tt: 90, desc: "Every other cooldown −2s." },
+  { id: "reversal", cls: "chronomancer", name: "Reversal", lv: 15, cd: 12, tt: 150, desc: "Turn back your wounds: restore 25% max HP." },
+  { id: "stasis", cls: "chronomancer", name: "Stasis", lv: 25, cd: 14, tt: 240, desc: "Freeze time: every foe is stunned 2s." },
+  { id: "echostrike", cls: "chronomancer", name: "Echo Strike", lv: 35, cd: 11, tt: 360, desc: "Strike twice for 170% each — past and present." },
+  { id: "momentum", cls: "chronomancer", name: "Momentum", lv: 55, cd: 17, tt: 600, desc: "+30% attack and +15% crit for 6s." },
+  { id: "paradox", cls: "chronomancer", name: "Paradox", lv: 75, cd: 25, tt: 900, desc: "Strike the front foe for 1200% attack." },
+  { id: "boltcast", cls: "stormcaller", name: "Boltcast", lv: 3, cd: 6, tt: 45, desc: "STORM — 270% to the front foe.", el: "storm" },
+  { id: "staticveil", cls: "stormcaller", name: "Static Veil", lv: 8, cd: 13, tt: 90, desc: "Shield equal to 20% max HP." },
+  { id: "arcflash", cls: "stormcaller", name: "Arc Flash", lv: 15, cd: 10, tt: 150, desc: "STORM — 280% to every foe.", el: "storm" },
+  { id: "ioncharge", cls: "stormcaller", name: "Ion Charge", lv: 25, cd: 15, tt: 240, desc: "+20% crit for 6s." },
+  { id: "stormlance", cls: "stormcaller", name: "Storm Lance", lv: 35, cd: 12, tt: 360, desc: "STORM — 520% to the front foe.", el: "storm" },
+  { id: "tempest", cls: "stormcaller", name: "Tempest", lv: 55, cd: 16, tt: 600, desc: "STORM — 330% to every foe and chills them 4s.", el: "storm" },
+  { id: "skyfall", cls: "stormcaller", name: "Skyfall", lv: 75, cd: 24, tt: 900, desc: "STORM — 950% to every foe.", el: "storm" },
 ];
 
 const ZONES = [
@@ -504,6 +589,33 @@ const BEAST_FORMS = [
 ];
 const beastForm = (lv) => { let f = BEAST_FORMS[0]; for (const b of BEAST_FORMS) if (lv >= b.lv) f = b; return f; };
 
+/* companions: classes that fight through a partner. The pet carries a share
+   of your power and the hero's own stats are REDUCED to pay for it — the
+   budget is split, not doubled. Pets have real HP, can fall in battle
+   (returning after a spell, or nursed back at camp), and can hold the
+   FRONT line (taking the hits) or fall BACK behind you. */
+const COMPANION_CLASSES = {
+  beastcaller: { kind: "beast", atkShare: 0.35, hpShare: 0.45, heroAtkMul: 0.75, heroDefMul: 1.0, petDefMul: 0.8 },
+  cleric: { kind: "guardian", atkShare: 0.85, hpShare: 0.55, heroAtkMul: 0.35, heroDefMul: 0.85, petDefMul: 1.1 },
+};
+const companionCfg = (g) => COMPANION_CLASSES[g.cls] || null;
+const GUARDIAN_FORMS = [
+  { lv: 1, name: "Novice Votary", glyph: "卫" },
+  { lv: 20, name: "Temple Guardian", glyph: "卫" },
+  { lv: 45, name: "Radiant Warden", glyph: "辉" },
+  { lv: 75, name: "Seraph of the Vow", glyph: "翼" },
+];
+const companionForm = (g) => {
+  if (g.cls === "beastcaller") return beastForm(g.level);
+  let f = GUARDIAN_FORMS[0];
+  for (const b of GUARDIAN_FORMS) if (g.level >= b.lv) f = b;
+  return f;
+};
+const petMaxOf = (g, st) => {
+  const c = companionCfg(g);
+  return c ? Math.max(20, Math.round(st.maxHp * c.hpShare)) : 0;
+};
+
 const tierScale = (t) => Math.pow(1.5, t - 1);
 const costScale = (t) => Math.pow(1.85, t - 1);
 const matIdxForTier = (t) => (t <= 3 ? 0 : t <= 6 ? 1 : t <= 9 ? 2 : 3);
@@ -588,7 +700,21 @@ function makeItem(tier, opts = {}) {
     if (k === "crit") stats.crit = +((stats.crit || 0) + 1 + 0.6 * rIdx).toFixed(1);
   }
   const procs = rollDropEnchants(slotKey, rIdx, opts.proc);
+  /* elemental affixes — wards on any gear from Rare-adjacent up; weapons from
+     Epic up may convert a share of every hit into an element (Eternals may
+     roll CHAOS: a random element per trigger, at a fat 50% share). */
+  let res;
+  if (rIdx >= 2 && Math.random() < 0.35) {
+    res = { el: pick(EL_KEYS), pct: +clamp((5 + tier * 1.2 + rIdx * 3) / 100, 0.05, 0.25).toFixed(3) };
+  }
+  let infuse;
+  if (slotKey === "weapon" && rIdx >= 3 && Math.random() < 0.18 + 0.06 * (rIdx - 3)) {
+    infuse = rIdx >= 6
+      ? { el: "chaos", pct: 0.5 }
+      : { el: pick(EL_KEYS), pct: +(0.25 + 0.05 * (rIdx - 3)).toFixed(2) };
+  }
   return {
+    res, infuse,
     id: itemSeq++,
     slot: slotKey, tier, rarity: rIdx,
     set: opts.set,
@@ -608,6 +734,8 @@ function itemStatText(it) {
   if (it.stats.def) p.push(`+${fmt(it.stats.def)} DEF`);
   if (it.stats.crit) p.push(`+${it.stats.crit}% CRIT`);
   if (it.wtype && WEAPON_TYPES[it.wtype]) p.push(`${WEAPON_TYPES[it.wtype].hands}H·${WEAPON_TYPES[it.wtype].spd}spd`);
+  if (it.res && ELEMENTS[it.res.el]) p.push(`${ELEMENTS[it.res.el].glyph}res${Math.round(it.res.pct * 100)}%`);
+  if (it.infuse) p.push(it.infuse.el === "chaos" ? `混infuse${Math.round(it.infuse.pct * 100)}%` : `${ELEMENTS[it.infuse.el].glyph}infuse${Math.round(it.infuse.pct * 100)}%`);
   for (const pid2 of itemProcs(it)) if (PROCS[pid2]) p.push(`✦${PROCS[pid2].name}`);
   return p.join(" · ");
 }
@@ -739,13 +867,13 @@ function setTiers(g) { return setTiersEq(g.eq); }
    per category, so similar boons (Scorch vs Stormbrand) never stack on a piece. */
 const PROC_CATS = ["offensive", "defensive", "sustain", "passive"];
 const PROCS = {
-  scorch: { name: "Scorch", cat: "offensive", aoe: false, color: "#c8452c", desc: "12% on hit: ignite the front foe for 60% ATK/s, 3s" },
-  stormbrand: { name: "Stormbrand", cat: "offensive", aoe: false, color: "#d9a441", desc: "10% on hit: lightning strikes the front foe for 150% ATK" },
-  chainarc: { name: "Chain Arc", cat: "offensive", aoe: true, color: "#6c8fc4", desc: "8% on hit: arcs to EVERY foe for 90% ATK" },
-  cindernova: { name: "Cindernova", cat: "offensive", aoe: true, color: "#ff5a47", desc: "6% on hit: fire bursts on EVERY foe for 130% ATK" },
+  scorch: { name: "Scorch", cat: "offensive", aoe: false, el: "fire", color: "#c8452c", desc: "12% on hit: ignite the front foe for 60% ATK/s, 3s" },
+  stormbrand: { name: "Stormbrand", cat: "offensive", aoe: false, el: "storm", color: "#d9a441", desc: "10% on hit: lightning strikes the front foe for 150% ATK" },
+  chainarc: { name: "Chain Arc", cat: "offensive", aoe: true, el: "storm", color: "#6c8fc4", desc: "8% on hit: arcs to EVERY foe for 90% ATK" },
+  cindernova: { name: "Cindernova", cat: "offensive", aoe: true, el: "fire", color: "#ff5a47", desc: "6% on hit: fire bursts on EVERY foe for 130% ATK" },
   stoneveil: { name: "Stoneveil", cat: "defensive", aoe: false, color: "#9aa0ab", desc: "10% when struck: raise a shield of 12% max HP" },
   thornmail: { name: "Thornmail", cat: "defensive", aoe: false, color: "#6fae8f", desc: "12% when struck: the striker takes 40% ATK back" },
-  frostbite: { name: "Frostbite", cat: "defensive", aoe: true, color: "#6c8fc4", desc: "12% on hit: chill EVERY foe, −30% foe attack, 4s" },
+  frostbite: { name: "Frostbite", cat: "defensive", aoe: true, el: "water", color: "#6c8fc4", desc: "12% on hit: chill EVERY foe, −30% foe attack, 4s" },
   lifedrink: { name: "Lifedrink", cat: "sustain", aoe: false, color: "#6fae8f", desc: "On every kill: restore 6% max HP" },
   leechfang: { name: "Leechfang", cat: "sustain", aoe: false, color: "#a678c8", desc: "10% on hit: drink 2% max HP from the wound" },
   hastewind: { name: "Hastewind", cat: "sustain", aoe: false, color: "#a678c8", desc: "15% on kill: every cooldown −1s" },
@@ -814,6 +942,21 @@ function eqProcs(g) {
   for (const k of SLOT_KEYS) for (const pid of itemProcs(g.eq[k])) s.add(pid);
   return s;
 }
+/* player's total resistance to an element: gear wards + bloodline + past life,
+   capped at 75% — you can blunt the wheel, never escape it entirely. */
+const RACE_RES = { ashborn: { fire: 0.25 }, deepborn: { water: 0.25 }, stormtouched: { storm: 0.25 }, terraborn: { earth: 0.25 } };
+const BG_RES = { pyre: { fire: 0.15 }, tide: { water: 0.15 }, rod: { storm: 0.15 }, quarry: { earth: 0.15 } };
+function playerRes(g, el) {
+  if (!el) return 0;
+  let r = 0;
+  for (const k of SLOT_KEYS) {
+    const it = g.eq[k];
+    if (it && it.res && it.res.el === el) r += it.res.pct;
+  }
+  r += (RACE_RES[g.race] && RACE_RES[g.race][el]) || 0;
+  r += (BG_RES[g.bg] && BG_RES[g.bg][el]) || 0;
+  return Math.min(0.75, r);
+}
 
 /* one Eternal artifact per tier — bosses alone may yield them (2%) */
 const ETERNALS = [
@@ -841,14 +984,23 @@ function makeFoe(g, kind) {
   const v = rnd(0.85, 1.15);
   let hp = eHp(lvl) * v, atk = eAtk(lvl) * v;
   let name = pick(z.enemies);
-  if (kind === "boss") { hp *= 6.5; atk *= 1.5; name = z.boss; }
+  if (kind === "boss") { hp *= 6.5; atk *= 1.5; name = ELEMENTS[BOSS_EL[g.zone % BOSS_EL.length]].glyph + " " + z.boss; }
   if (kind === "elite") { hp *= 2.5; atk *= 1.3; name = "Elite " + name; }
   if (kind === "pack") { hp *= 0.75; atk *= 0.8; }
+  /* elemental alignment: bosses always bear their zone's element and are
+     IMMUNE to it; lesser foes align 65% of the time, resistance by menace. */
+  let el = null, elRes = 0;
+  if (kind === "boss") { el = BOSS_EL[g.zone % BOSS_EL.length]; elRes = 1; }
+  else if (Math.random() < 0.65) {
+    el = pick(EL_KEYS);
+    elRes = kind === "elite" ? 0.45 : 0.2;
+    hp *= 1.08; atk *= 1.08;
+  }
   return {
-    name, lvl,
+    name: el && kind !== "boss" ? ELEMENTS[el].glyph + " " + name : name, lvl,
     hp: Math.round(hp), maxHp: Math.round(hp), atk: Math.round(atk),
     isBoss: kind === "boss", isElite: kind === "elite", inPack: kind === "pack",
-    stun: 0,
+    stun: 0, el, elRes, bsT: kind === "boss" ? 6 : 0, bsN: 0, enrage: 1,
   };
 }
 
@@ -919,6 +1071,7 @@ function newGame(cls, name, race = "human", bg = "farmhand") {
     bounty: null, bountyCd: 0,
     echoes: 0, rebirths: 0,
     vault: [], runes: {}, pendingUpgrades: [],
+    rage: 0, chrono: 0, pet: null, formation: "front",
     loadoutIdx: 0, loadouts: [null, null, null],
     loadoutFocus: [null, null, null],
     savedAt: Date.now(),
@@ -1073,6 +1226,8 @@ function buildValue(g, it, slot) {
     v += eff * w[k] * (k === "atk" ? wf : 1);
   }
   v += procPoints(g, itemProcs(it), slot);
+  if (it.res) v += it.res.pct * refSt.maxHp * 0.08 * w.hp;
+  if (it.infuse) v += it.infuse.pct * refSt.atk * 0.22 * w.atk;
   // marginal set-bond value: the bonds this piece would complete/extend (or
   // break) versus your current gear — so relics that finish a bond finally
   // read as the upgrades they are, and the AI won't shatter a bond blindly.
@@ -1297,7 +1452,7 @@ function rewardFoe(g, f, st) {
   const setB = setTiers(g).t;
   const setRewardMult = 1 + 0.06 * setB.binding + 0.04 * setB.chime;
   const xpGain = Math.round(eXp(f.lvl) * rm * (g.restedT > 0 ? (g.bg === "pilgrim" ? 1.35 : 1.25) : 1) * sc * (rmods.xp || 1) * echoMult * setRewardMult * (eqProcs(g).has("sagemind") ? 1.08 : 1) * (g.bg === "scholar" ? 1.1 : 1));
-  const goldGain = Math.round(eGold(f.lvl) * rm * streakBonus * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1.1 : 1) * (g.bg === "noble" ? 1.08 : 1));
+  const goldGain = Math.round(eGold(f.lvl) * rm * streakBonus * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1.1 : 1) * (g.bg === "noble" ? 1.08 : 1) * (g.bg === "rod" ? 1.05 : 1));
   g.xp += xpGain; g.gold += goldGain; g.lifetimeKills += 1;
   bumpBounty(g, "kills");
   g.vigor = Math.max(0, g.vigor - 0.35 * (g.bg === "farmhand" ? 0.75 : 1));
@@ -1310,6 +1465,7 @@ function rewardFoe(g, f, st) {
     for (const ck of Object.keys(g.cds)) g.cds[ck] = Math.max(0, g.cds[ck] - 0.5);
   }
   if (g.cls === "necromancer") g.graveChill = 3;
+  if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 12);
   const kprocs = eqProcs(g);
   if (kprocs.has("lifedrink")) g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.06));
   if (kprocs.has("hastewind") && Math.random() < 0.15) {
@@ -1321,7 +1477,7 @@ function rewardFoe(g, f, st) {
   if (f.isBoss) {
     const q = ri(4, 7);
     g.materials[MATS[mi].key] += q;
-    const gq = ri(1, 2);
+    const gq = ri(1, 2) + (g.bg === "quarry" ? 1 : 0);
     g.materials.glyph = (g.materials.glyph || 0) + gq;
     pushLog(g, `Harvested ${q}× ${MATS[mi].name} and ${gq}× Glyph Dust.`, "loot");
     if (Math.random() < 0.25) {
@@ -1465,10 +1621,29 @@ function step(prev) {
   const fx = { push: (x) => { g.fx = [...g.fx, { ...x, at: now }]; } };
   const st = calcStats(g);
   const dt = TICK_MS / 1000;
+  /* ---- companion lifecycle: cap to scaling max, tick revival ---- */
+  const petCfg = companionCfg(g);
+  const petCap = petCfg ? petMaxOf(g, st) : 0;
+  if (petCfg) {
+    if (!g.pet) g.pet = { hp: petCap, downT: 0 };
+    g.pet.hp = Math.min(g.pet.hp, petCap);
+    if (g.pet.hp <= 0 && g.pet.downT > 0) {
+      g.pet.downT -= dt;
+      if (g.pet.downT <= 0) {
+        g.pet.hp = Math.round(petCap * 0.35);
+        g.pet.downT = 0;
+        pushLog(g, `Your ${petCfg.kind === "guardian" ? "Guardian" : "beast"} returns to your side.`, "buff");
+      }
+    }
+  } else g.pet = null;
 
   /* ---- camp: rest, sleep, train ---- */
   if (g.camping) {
-    if (g.hp < st.maxHp) g.hp = Math.min(st.maxHp, g.hp + Math.max(1, st.maxHp * (g.bg === "hermit" ? 0.075 : 0.05)));
+    if (g.hp < st.maxHp) g.hp = Math.min(st.maxHp, g.hp + Math.max(1, st.maxHp * ((g.bg === "hermit" ? 0.075 : 0.05) + (g.race === "deepborn" ? 0.01 : 0))));
+    if (petCfg && g.pet) {
+      if (g.pet.hp <= 0) { g.pet.downT = Math.max(0, (g.pet.downT || 0) - dt * 2); if (g.pet.downT <= 0 && g.pet.hp <= 0) { g.pet.hp = Math.round(petCap * 0.35); pushLog(g, "Tended by firelight, your companion stirs awake.", "buff"); } }
+      else if (g.pet.hp < petCap) g.pet.hp = Math.min(petCap, g.pet.hp + Math.max(1, Math.round(petCap * 0.08)));
+    }
     if (g.vigor < 100) {
       if (g.vigor < 40 && !g.wasTired) g.wasTired = true;
       g.vigor = Math.min(100, g.vigor + (g.bg === "hermit" ? 1.35 : 0.9));
@@ -1492,10 +1667,12 @@ function step(prev) {
   }
 
   // timers
-  for (const k of Object.keys(g.cds)) g.cds[k] = Math.max(0, g.cds[k] - dt);
+  for (const k of Object.keys(g.cds)) g.cds[k] = Math.max(0, g.cds[k] - dt * (g.cls === "chronomancer" ? 1.5 : 1));
   const b = g.buffs;
   if (b.atkT > 0) { b.atkT -= dt; if (b.atkT <= 0) b.atkMult = 1; }
   if (b.critT > 0) { b.critT -= dt; if (b.critT <= 0) b.critAdd = 0; }
+  if (b.vowT > 0) b.vowT -= dt;
+  if (b.communeT > 0) b.communeT -= dt;
   if (b.slowT > 0) b.slowT -= dt;
   if (g.restedT > 0) g.restedT = Math.max(0, g.restedT - dt);
   if (g.graveChill > 0) g.graveChill -= 1;
@@ -1545,43 +1722,85 @@ function step(prev) {
     const amt = Math.round(st.maxHp * frac * healMul);
     g.hp = Math.min(st.maxHp, g.hp + amt);
     fx.push({ id: floatSeq++, text: "+" + fmt(amt), crit: false, side: "player", heal: true });
+    if (petCfg && g.pet && g.pet.hp > 0) {
+      const pm2 = petMaxOf(g, st);
+      const pAmt = Math.round(pm2 * frac * healMul);
+      g.pet.hp = Math.min(pm2, g.pet.hp + pAmt);
+      fx.push({ id: floatSeq++, text: "+" + fmt(pAmt), crit: false, side: "beast", heal: true });
+    }
   };
   const voidMul = g.race === "voidborn" && foes.length > 1 ? 1.1 : 1;
-  const hitOne = (foe, mult) => {
+  /* elemental offense: explicit skill elements ride the wheel whole; neutral
+     hits may convert a share via gear infusion (chaos = random per trigger)
+     and the Ashborn's +10% fire ember. Immune bosses null their own element. */
+  const wInf = (g.eq.weapon && g.eq.weapon.infuse) || null;
+  const hitOne = (foe, mult, el) => {
     const isCrit = Math.random() * 100 < critCh;
-    const dmg = Math.max(1, Math.round(baseAtk * mult * voidMul * rnd(0.85, 1.15) * (isCrit ? critDmg : 1)));
+    let dmg = Math.max(1, Math.round(baseAtk * mult * voidMul * rnd(0.85, 1.15) * (isCrit ? critDmg : 1)));
+    if (el) {
+      dmg = Math.max(0, Math.round(dmg * foeElemMod(el, foe)));
+    } else {
+      let neutral = dmg, elemPart = 0;
+      if (wInf) {
+        const iel = wInf.el === "chaos" ? pick(EL_KEYS) : wInf.el;
+        const conv = Math.round(dmg * wInf.pct);
+        neutral -= conv;
+        elemPart += Math.round(conv * foeElemMod(iel, foe));
+      }
+      if (g.race === "ashborn") {
+        const ember = Math.round(dmg * 0.1);
+        elemPart += Math.round(ember * foeElemMod("fire", foe));
+      }
+      dmg = neutral + elemPart;
+    }
     foe.hp -= dmg;
     if (isCrit && g.race === "moonchild") g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.01));
+    if (isCrit && g.cls === "stormcaller") {
+      for (const f2 of foes) {
+        if (f2 === foe || f2.hp <= 0) continue;
+        const arc = Math.max(1, Math.round(baseAtk * 0.35 * foeElemMod("storm", f2)));
+        f2.hp -= arc;
+      }
+      if (foes.length > 1) fx.push({ id: floatSeq++, text: "雷 arc", crit: false, side: "enemy" });
+    }
     return { dmg, isCrit };
   };
-  const dealFront = (mult, label) => {
+  const dealFront = (mult, label, el) => {
     if (!foes.length) return;
-    const { dmg, isCrit } = hitOne(foes[0], mult);
-    fx.push({ id: floatSeq++, text: (label ? label + " " : "") + "−" + fmt(dmg), crit: isCrit, side: "enemy" });
+    const { dmg, isCrit } = hitOne(foes[0], mult, el);
+    const gl = el ? ELEMENTS[el].glyph + " " : "";
+    fx.push({ id: floatSeq++, text: gl + (label ? label + " " : "") + "−" + fmt(dmg), crit: isCrit, side: "enemy" });
   };
-  const dealAll = (mult, label) => {
+  const dealAll = (mult, label, el) => {
     let total = 0, anyCrit = false;
     for (const foe of foes) {
-      const { dmg, isCrit } = hitOne(foe, mult);
+      const { dmg, isCrit } = hitOne(foe, mult, el);
       total += dmg;
       anyCrit = anyCrit || isCrit;
     }
-    fx.push({ id: floatSeq++, text: label + " −" + fmt(total), crit: anyCrit, side: "enemy" });
+    fx.push({ id: floatSeq++, text: (el ? ELEMENTS[el].glyph + " " : "") + label + " −" + fmt(total), crit: anyCrit, side: "enemy" });
   };
 
   for (const sid of g.skillsOn) {
     const sk = SKILLS.find((s) => s.id === sid);
-    if (!sk || !g.trained.includes(sid) || (g.cds[sid] || 0) > 0) continue;
+    if (!sk || !g.trained.includes(sid)) continue;
+    if (g.cls === "ravager") {
+      if ((g.rage || 0) < sk.cd * 4) continue;
+    } else if ((g.cds[sid] || 0) > 0) continue;
     let cast = true;
+    const skDef = SKILLS.find((s2) => s2.id === sid);
+    const skEl = (skDef && skDef.el) || SKILL_EL[sid] || null;
+    const dealFrontE = (m2, l2) => dealFront(m2, l2, skEl);
+    const dealAllE = (m2, l2) => dealAll(m2, l2, skEl);
     switch (sid) {
-      case "cleave": dealAll(2.5, "Cleave"); break;
+      case "cleave": dealAllE(2.5, "Cleave"); break;
       case "ironskin": gainShield(st.maxHp * 0.3); pushLog(g, "Iron Skin hardens around you.", "buff"); break;
       case "fury": b.atkMult = 1.5; b.atkT = 6; pushLog(g, "Battle Fury ignites.", "buff"); break;
-      case "execute": dealFront(foes[0] && foes[0].hp < foes[0].maxHp * 0.3 ? 5 : 2, "Execute"); break;
-      case "fireball": dealFront(3, "Fireball"); break;
-      case "frost": dealFront(1.5, "Frost"); b.slowT = 5; break;
+      case "execute": dealFrontE(foes[0] && foes[0].hp < foes[0].maxHp * 0.3 ? 5 : 2, "Execute"); break;
+      case "fireball": dealFrontE(3, "Fireball"); break;
+      case "frost": dealFrontE(1.5, "Frost"); b.slowT = 5; break;
       case "arcane": b.critAdd = 25; b.critT = 6; pushLog(g, "Arcane Mind sharpens.", "buff"); break;
-      case "meteor": dealAll(7, "Meteor"); break;
+      case "meteor": dealAllE(7, "Meteor"); break;
       case "heal":
         if (g.hp < st.maxHp * 0.75) heal(0.25);
         else cast = false;
@@ -1592,16 +1811,16 @@ function step(prev) {
         heal(0.1);
         pushLog(g, "Spirit Ward encircles you.", "buff");
         break;
-      case "thunder": dealFront(4.5, "Thunder"); if (foes[0]) foes[0].stun = 2; break;
+      case "thunder": dealFrontE(4.5, "Thunder"); if (foes[0]) foes[0].stun = 2; break;
       case "secondwind":
         if (g.hp < st.maxHp * 0.5) {
           g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.2));
           fx.push({ id: floatSeq++, text: "+" + fmt(st.maxHp * 0.2), crit: false, side: "player", heal: true });
         } else cast = false;
         break;
-      case "whirlwind": dealAll(4, "Whirlwind"); break;
-      case "titanwrath": dealFront(9, "Titan's Wrath"); break;
-      case "chain": dealAll(3.5, "Chain"); break;
+      case "whirlwind": dealAllE(4, "Whirlwind"); break;
+      case "titanwrath": dealFrontE(9, "Titan's Wrath"); break;
+      case "chain": dealAllE(3.5, "Chain"); break;
       case "timewarp": {
         let hastened = false;
         for (const k of Object.keys(g.cds)) {
@@ -1611,16 +1830,16 @@ function step(prev) {
         else cast = false;
         break;
       }
-      case "supernova": dealAll(10, "Supernova"); break;
+      case "supernova": dealAllE(10, "Supernova"); break;
       case "aegis": gainShield(st.maxHp * 0.4); pushLog(g, "Jade Aegis shimmers into being.", "buff"); break;
-      case "thunders5": dealAll(3.8, "Thunders"); if (foes[0]) foes[0].stun = 2; break;
+      case "thunders5": dealAllE(3.8, "Thunders"); if (foes[0]) foes[0].stun = 2; break;
       case "breath":
         if (g.hp < st.maxHp * 0.6) {
           g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.4));
           fx.push({ id: floatSeq++, text: "+" + fmt(st.maxHp * 0.4), crit: false, side: "player", heal: true });
         } else cast = false;
         break;
-      case "twinfangs": dealFront(1.3, "Fang"); dealFront(1.3, "Fang"); break;
+      case "twinfangs": dealFrontE(1.3, "Fang"); dealFrontE(1.3, "Fang"); break;
       case "parryflow": gainShield(st.maxHp * 0.2); pushLog(g, "You settle into the parry flow.", "buff"); break;
       case "bleedingedge": b.dot = Math.round(st.atk * 1.0); b.dotT = 3; pushLog(g, "The wound weeps freely.", "buff"); break;
       case "heartseeker": {
@@ -1631,103 +1850,139 @@ function step(prev) {
         }
         break;
       }
-      case "mirrorblades": dealAll(3, "Mirrors"); break;
+      case "mirrorblades": dealAllE(3, "Mirrors"); break;
       case "deathspoem": b.atkMult = 1.4; b.atkT = 6; b.critAdd = 15; b.critT = 6; pushLog(g, "You recite Death's Poem.", "buff"); break;
-      case "finalcut": dealFront(12, "Final Cut"); break;
-      case "wolfbite": dealFront(2.4, "Wolf"); break;
+      case "finalcut": dealFrontE(12, "Final Cut"); break;
+      case "wolfbite": dealFrontE(2.4, "Wolf"); break;
       case "bearhide": gainShield(st.maxHp * 0.28); pushLog(g, "Bear Hide thickens around you.", "buff"); break;
       case "packhowl": b.atkMult = 1.35; b.atkT = 5; pushLog(g, "The pack answers your howl.", "buff"); break;
       case "serpentvenom": b.dot = Math.round(st.atk * 0.9); b.dotT = 4; pushLog(g, "Venom takes hold.", "buff"); break;
-      case "stampede": dealAll(3.2, "Stampede"); break;
-      case "swarm": dealAll(3, "Swarm"); b.slowT = 5; break;
-      case "beastking": dealFront(8, "Beast King"); if (foes[0]) foes[0].stun = 2; break;
-      case "palm": dealFront(2.6, "Palm"); break;
+      case "stampede": dealAllE(3.2, "Stampede"); break;
+      case "swarm": dealAllE(3, "Swarm"); b.slowT = 5; break;
+      case "beastking": dealFrontE(8, "Beast King"); if (foes[0]) foes[0].stun = 2; break;
+      case "palm": dealFrontE(2.6, "Palm"); break;
       case "ironbody": gainShield(st.maxHp * 0.25); pushLog(g, "Iron Body settles like bedrock.", "buff"); break;
-      case "fists3": dealFront(1, "Fists"); dealFront(1, "Fists"); dealFront(1, "Fists"); break;
-      case "pressure": dealFront(3.5, "Pressure"); if (foes[0]) foes[0].stun = 2; break;
-      case "cyclone": dealAll(3.3, "Cyclone"); break;
+      case "fists3": dealFrontE(1, "Fists"); dealFrontE(1, "Fists"); dealFrontE(1, "Fists"); break;
+      case "pressure": dealFrontE(3.5, "Pressure"); if (foes[0]) foes[0].stun = 2; break;
+      case "cyclone": dealAllE(3.3, "Cyclone"); break;
       case "innerfire":
         b.atkMult = 1.3; b.atkT = 6;
         g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.15));
         fx.push({ id: floatSeq++, text: "+" + fmt(st.maxHp * 0.15), crit: false, side: "player", heal: true });
         break;
-      case "ancestorfist": dealFront(10, "Ancestors"); break;
-      case "shadowcut": dealFront(2.5, "Shadow"); break;
+      case "ancestorfist": dealFrontE(10, "Ancestors"); break;
+      case "shadowcut": dealFrontE(2.5, "Shadow"); break;
       case "smokeveil": b.slowT = 4; gainShield(st.maxHp * 0.12); pushLog(g, "Smoke swallows the field.", "buff"); break;
       case "envenom": b.dot = Math.round(st.atk * 1.1); b.dotT = 4; pushLog(g, "Venom finds the vein.", "buff"); break;
-      case "deathmark": dealFront(b.dotT > 0 ? 6 : 4.5, "Mark"); break;
-      case "fanknives": dealAll(3, "Knives"); break;
+      case "deathmark": dealFrontE(b.dotT > 0 ? 6 : 4.5, "Mark"); break;
+      case "fanknives": dealAllE(3, "Knives"); break;
       case "nightembrace": b.atkMult = 1.25; b.atkT = 5; b.critAdd = 20; b.critT = 5; pushLog(g, "Night folds around you.", "buff"); break;
-      case "assassin": dealFront(foes[0] && foes[0].hp < foes[0].maxHp * 0.35 ? 13 : 5, "Assassinate"); break;
-      case "shieldbash": dealFront(2.2, "Bash"); if (foes[0]) foes[0].stun = 2; break;
+      case "assassin": dealFrontE(foes[0] && foes[0].hp < foes[0].maxHp * 0.35 ? 13 : 5, "Assassinate"); break;
+      case "shieldbash": dealFrontE(2.2, "Bash"); if (foes[0]) foes[0].stun = 2; break;
       case "bulwark2": gainShield(st.maxHp * 0.35); pushLog(g, "Your bulwark rises.", "buff"); break;
       case "challenge": b.slowT = 5; pushLog(g, "Your challenge shakes their resolve.", "buff"); break;
-      case "retort": dealFront(2.5 + Math.max(0, foes.length - 1), "Retort"); break;
-      case "shieldwave": dealAll(2.8, "Wave"); gainShield(st.maxHp * 0.12); break;
+      case "retort": dealFrontE(2.5 + Math.max(0, foes.length - 1), "Retort"); break;
+      case "shieldwave": dealAllE(2.8, "Wave"); gainShield(st.maxHp * 0.12); break;
       case "unbreakable":
         gainShield(st.maxHp * 0.5);
         g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.12));
         pushLog(g, "Unbreakable — the wall holds.", "buff");
         break;
-      case "aimedshot": dealFront(2.8, "Aimed"); break;
+      case "aimedshot": dealFrontE(2.8, "Aimed"); break;
       case "camostep": b.slowT = 4; gainShield(st.maxHp * 0.12); pushLog(g, "You melt into cover.", "buff"); break;
       case "serpentarrow": b.dot = Math.round(st.atk * 1.0); b.dotT = 4; pushLog(g, "The serpent arrow bites deep.", "buff"); break;
-      case "pinningshot": dealFront(3.2, "Pinning"); if (foes[0]) foes[0].stun = 2; break;
-      case "arrowstorm": dealAll(3.1, "Storm"); break;
+      case "pinningshot": dealFrontE(3.2, "Pinning"); if (foes[0]) foes[0].stun = 2; break;
+      case "arrowstorm": dealAllE(3.1, "Storm"); break;
       case "hawkeye": b.atkMult = 1.3; b.atkT = 6; b.critAdd = 20; b.critT = 6; pushLog(g, "Hawkeye — the world slows.", "buff"); break;
-      case "falconvolley": dealFront(11.5, "Falcon"); break;
-      case "recklessblow": dealFront(3, "Reckless"); break;
+      case "falconvolley": dealFrontE(11.5, "Falcon"); break;
+      case "recklessblow": dealFrontE(3, "Reckless"); break;
       case "bloodpact": b.atkMult = 1.4; b.atkT = 6; pushLog(g, "Blood pact sworn.", "buff"); break;
-      case "frenzy": dealFront(1.1, "Frenzy"); dealFront(1.1, "Frenzy"); dealFront(1.1, "Frenzy"); break;
-      case "rampage": dealAll(3, "Rampage"); break;
+      case "frenzy": dealFrontE(1.1, "Frenzy"); dealFrontE(1.1, "Frenzy"); dealFrontE(1.1, "Frenzy"); break;
+      case "rampage": dealAllE(3, "Rampage"); break;
       case "warcry2": b.slowT = 5; b.atkMult = 1.25; b.atkT = 5; pushLog(g, "Your war cry splits the air.", "buff"); break;
       case "laststand": heal(0.25); b.atkMult = 1.35; b.atkT = 6; pushLog(g, "Last stand — you will not fall here.", "buff"); break;
-      case "berserkrush": dealFront(12.5, "Rush"); break;
-      case "shadowbolt": dealFront(3, "Bolt"); break;
+      case "berserkrush": dealFrontE(12.5, "Rush"); break;
+      case "shadowbolt": dealFrontE(3, "Bolt"); break;
       case "curse": b.slowT = 5; pushLog(g, "A curse of weakness settles.", "buff"); break;
-      case "drainlife": dealFront(2, "Drain"); heal(0.12); break;
+      case "drainlife": dealFrontE(2, "Drain"); heal(0.12); break;
       case "hex": b.dot = Math.round(st.atk * 1.2); b.dotT = 4; pushLog(g, "The hex festers.", "buff"); break;
-      case "shadowflame": dealAll(3.2, "Shadowflame"); break;
+      case "shadowflame": dealAllE(3.2, "Shadowflame"); break;
       case "soulburn": b.atkMult = 1.25; b.atkT = 6; b.critAdd = 20; b.critT = 6; pushLog(g, "Soul burns bright.", "buff"); break;
-      case "cataclysm": dealAll(10, "Cataclysm"); break;
-      case "smite": dealFront(2.5, "Smite"); break;
+      case "cataclysm": dealAllE(10, "Cataclysm"); break;
+      case "smite": dealFrontE(2.5, "Smite"); break;
       case "renew": if (g.hp < st.maxHp * 0.75) heal(0.25); else cast = false; break;
       case "blessing": gainShield(st.maxHp * 0.25); b.atkMult = 1.2; b.atkT = 5; pushLog(g, "A blessing steadies you.", "buff"); break;
-      case "holynova": dealAll(2.6, "Nova"); heal(0.12); break;
+      case "holynova": dealAllE(2.6, "Nova"); heal(0.12); break;
       case "sanctuary": gainShield(st.maxHp * 0.4); heal(0.15); pushLog(g, "Sanctuary surrounds you.", "buff"); break;
-      case "judgment2": dealFront(5, "Judgment"); break;
+      case "communion": {
+        const cc = companionCfg(g);
+        if (cc && g.pet && g.pet.hp <= 0) {
+          b.communeT = 8;
+          g.hp = Math.max(1, g.hp - Math.round(st.maxHp * 0.1));
+          pushLog(g, "Martyr's Communion — the Guardian's might floods your veins.", "buff");
+        } else cast = false;
+        break;
+      }
       case "resurrection": heal(0.6); gainShield(st.maxHp * 0.3); pushLog(g, "Radiant grace floods your wounds.", "buff"); break;
-      case "quickdraw": dealFront(2.7, "Quick"); break;
+      case "quickdraw": dealFrontE(2.7, "Quick"); break;
       case "parrystance": gainShield(st.maxHp * 0.22); pushLog(g, "You settle into the parry.", "buff"); break;
-      case "crosscut": dealFront(1.5, "Cross"); dealFront(1.5, "Cross"); break;
+      case "crosscut": dealFrontE(1.5, "Cross"); dealFrontE(1.5, "Cross"); break;
       case "focusstrike": {
         if (foes[0]) { const dmg = Math.max(1, Math.round(baseAtk * 4.2 * rnd(0.85, 1.15) * critDmg)); foes[0].hp -= dmg; fx.push({ id: floatSeq++, text: "Focus −" + fmt(dmg), crit: true, side: "enemy" }); }
         break;
       }
-      case "windcut": dealAll(3.2, "Wind"); break;
+      case "windcut": dealAllE(3.2, "Wind"); break;
       case "bushido": b.atkMult = 1.35; b.atkT = 6; b.critAdd = 15; b.critT = 6; pushLog(g, "Bushido — mind like still water.", "buff"); break;
-      case "onecut": dealFront(foes[0] && foes[0].hp < foes[0].maxHp * 0.35 ? 13 : 5, "One-Cut"); break;
-      case "clawswipe": dealFront(2.5, "Claw"); break;
+      case "onecut": dealFrontE(foes[0] && foes[0].hp < foes[0].maxHp * 0.35 ? 13 : 5, "One-Cut"); break;
+      case "clawswipe": dealFrontE(2.5, "Claw"); break;
       case "barkskin": gainShield(st.maxHp * 0.25); pushLog(g, "Bark hardens over your skin.", "buff"); break;
       case "regrowth": heal(0.22); break;
-      case "thornburst": dealAll(2.8, "Thorns"); break;
+      case "thornburst": dealAllE(2.8, "Thorns"); break;
       case "wildshape": b.atkMult = 1.3; b.atkT = 6; heal(0.12); pushLog(g, "You take the shape of the wild.", "buff"); break;
-      case "hurricane": dealAll(3, "Hurricane"); b.slowT = 5; break;
-      case "avatar": dealAll(9.5, "Avatar"); break;
-      case "boneshard": dealFront(2.6, "Bone"); break;
+      case "hurricane": dealAllE(3, "Hurricane"); b.slowT = 5; break;
+      case "avatar": dealAllE(9.5, "Avatar"); break;
+      case "boneshard": dealFrontE(2.6, "Bone"); break;
       case "graspdead": b.slowT = 5; pushLog(g, "Dead hands claw at their feet.", "buff"); break;
       case "plaguetouch": b.dot = Math.round(st.atk * 1.1); b.dotT = 4; pushLog(g, "Plague takes root.", "buff"); break;
-      case "soulrend": dealFront(3, "Rend"); heal(0.1); break;
-      case "bonestorm": dealAll(3, "Bonestorm"); break;
+      case "soulrend": dealFrontE(3, "Rend"); heal(0.1); break;
+      case "bonestorm": dealAllE(3, "Bonestorm"); break;
       case "deathpact": b.atkMult = 1.25; b.atkT = 6; b.critAdd = 20; b.critT = 6; pushLog(g, "You seal a pact with death.", "buff"); break;
-      case "apocalypse": dealAll(10, "Apocalypse"); break;
-      case "runeblade": dealFront(2.8, "Rune"); break;
+      case "apocalypse": dealAllE(10, "Apocalypse"); break;
+      case "runeblade": dealFrontE(2.8, "Rune"); break;
       case "manaward": gainShield(st.maxHp * 0.25); pushLog(g, "A mana ward flickers up.", "buff"); break;
       case "flamestrike": b.dot = Math.round(st.atk * 1.1); b.dotT = 3; pushLog(g, "Runic flame clings on.", "buff"); break;
-      case "spellcleave": dealAll(3, "Spellcleave"); break;
+      case "spellcleave": dealAllE(3, "Spellcleave"); break;
       case "arcanesurge": b.atkMult = 1.3; b.atkT = 6; b.critAdd = 15; b.critT = 6; pushLog(g, "Arcane power surges.", "buff"); break;
       case "blinkstrike": { if (foes[0]) { const dmg = Math.max(1, Math.round(baseAtk * 4.5 * rnd(0.85, 1.15) * critDmg)); foes[0].hp -= dmg; fx.push({ id: floatSeq++, text: "Blink −" + fmt(dmg), crit: true, side: "enemy" }); } break; }
-      case "spellstorm": dealAll(10, "Spellstorm"); break;
+      case "spellstorm": dealAllE(10, "Spellstorm"); break;
+      case "sunder": dealFrontE(3, "Sunder"); break;
+      case "bloodroar": b.atkMult = 1.35; b.atkT = 6; pushLog(g, "Your roar tastes of blood.", "buff"); break;
+      case "skullsplit": dealFrontE(3.8, "Skullsplit"); if (foes[0]) foes[0].stun = 2; break;
+      case "carnage": dealAllE(3.3, "Carnage"); break;
+      case "painfeast": heal(0.18); b.atkMult = Math.max(b.atkMult, 1.2); b.atkT = Math.max(b.atkT, 5); break;
+      case "annihilate": dealFrontE(11, "Annihilate"); break;
+      case "ragequake": dealAllE(9.5, "Ragequake"); break;
+      case "stillmind": gainShield(st.maxHp * 0.28); pushLog(g, "Stillness settles over you.", "buff"); break;
+      case "graceful": heal(0.24); break;
+      case "vowward": b.vowT = 6; pushLog(g, "The Vow tightens — every blow will answer harder.", "buff"); break;
+      case "patience": b.slowT = 5; pushLog(g, "Your patience unnerves them.", "buff"); break;
+      case "rebuke": dealAllE(3.2, "Rebuke"); break;
+      case "sanctum": gainShield(st.maxHp * 0.45); heal(0.15); pushLog(g, "Sanctum encloses you.", "buff"); break;
+      case "finalvow": dealAllE(9, "Final Vow"); break;
+      case "timelash": dealFrontE(2.7, "Timelash"); break;
+      case "hasteflow": { for (const ck of Object.keys(g.cds)) if (ck !== "hasteflow") g.cds[ck] = Math.max(0, g.cds[ck] - 2); pushLog(g, "Time loosens its grip.", "buff"); break; }
+      case "reversal": heal(0.25); break;
+      case "stasis": for (const f2 of foes) f2.stun = 2; pushLog(g, "The moment freezes solid.", "buff"); break;
+      case "echostrike": dealFrontE(1.7, "Echo"); dealFrontE(1.7, "Echo"); break;
+      case "momentum": b.atkMult = 1.3; b.atkT = 6; b.critAdd = 15; b.critT = 6; break;
+      case "paradox": dealFrontE(12, "Paradox"); break;
+      case "boltcast": dealFrontE(2.7, "Bolt"); break;
+      case "staticveil": gainShield(st.maxHp * 0.2); pushLog(g, "Static crackles around you.", "buff"); break;
+      case "arcflash": dealAllE(2.8, "Arcflash"); break;
+      case "ioncharge": b.critAdd = 20; b.critT = 6; pushLog(g, "Charge saturates the air.", "buff"); break;
+      case "stormlance": dealFrontE(5.2, "Stormlance"); break;
+      case "tempest": dealAllE(3.3, "Tempest"); b.slowT = 4; break;
+      case "skyfall": dealAllE(9.5, "Skyfall"); break;
       case "aegisjudge": {
         if (foes[0]) {
           const isC = Math.random() * 100 < critCh;
@@ -1740,10 +1995,16 @@ function step(prev) {
       }
       default: cast = false;
     }
-    if (cast) g.cds[sid] = sk.cd;
+    if (cast) {
+      if (g.cls === "ravager") g.rage = Math.max(0, (g.rage || 0) - sk.cd * 4);
+      else g.cds[sid] = sk.cd;
+    }
   }
 
   g.hurtLastTick = false;
+  if (g.cls === "ravager" && foes.length) g.rage = Math.min(100, (g.rage || 0) + 6);
+  if (g.cls === "ravager" && !foes.length) g.rage = Math.max(0, (g.rage || 0) - 2);
+  if (g.cls === "chronomancer") g.chrono = ((g.chrono || 0) + 1) % 4;
   // Spellblade arcane edge: every 3rd strike detonates
   if (g.cls === "spellblade" && foes[0]) {
     g.arcaneCount = (g.arcaneCount || 0) + 1;
@@ -1766,8 +2027,14 @@ function step(prev) {
     const wtM = WEAPON_TYPES[(wMain && wMain.wtype) || "sword"] || WEAPON_TYPES.sword;
     const spdEff = wtM.spd + (g.cls === "monk" ? 0.15 : 0) + (g.race === "windborn" ? 0.1 : 0);
     const mMul = wtM.dmg * (masteryOf(g, wMain) ? 1.1 : g.race === "human" ? 1.08 : 1);
-    dealFront((g.cls === "beastcaller" ? 0.75 : 1) * mMul);
-    if (spdEff > 1 && Math.random() < spdEff - 1) dealFront(0.8 * mMul);
+    const heroMul = petCfg
+      ? (b.communeT > 0 ? petCfg.heroAtkMul + petCfg.atkShare * 0.8 : petCfg.heroAtkMul)
+      : 1;
+    if (g.cls !== "vowkeeper") {
+      dealFront(heroMul * mMul);
+      if (spdEff > 1 && Math.random() < spdEff - 1) dealFront(0.8 * heroMul * mMul);
+      if (g.cls === "chronomancer" && g.chrono === 0) dealFront(1 * heroMul * mMul, "Echo");
+    }
     if (g.cls === "blademaster") {
       const off = g.eq.offhand;
       if (off && off.wtype && WEAPON_TYPES[off.wtype] && WEAPON_TYPES[off.wtype].hands === 1) {
@@ -1775,21 +2042,22 @@ function step(prev) {
         dealFront(0.45 * oMul, "Off");
       }
     }
-    if (g.cls === "beastcaller" && foes[0]) {
-      const bd = Math.max(1, Math.round(baseAtk * 0.3 * rnd(0.85, 1.15)));
+    if (petCfg && g.pet && g.pet.hp > 0 && foes[0]) {
+      const petAtk = st.atk * petCfg.atkShare * b.atkMult * (bossFight ? 1 + 0.12 * fullSets : 1);
+      const bd = Math.max(1, Math.round(petAtk * rnd(0.85, 1.15)));
       foes[0].hp -= bd;
-      fx.push({ id: floatSeq++, text: beastForm(g.level).glyph + " −" + fmt(bd), crit: false, side: "beast" });
+      fx.push({ id: floatSeq++, text: companionForm(g).glyph + " −" + fmt(bd), crit: false, side: "beast" });
     }
   }
   if (g.cls === "druid" && !g.hurtLastTick && g.hp < st.maxHp) g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.03));
   if (g.race === "seafolk" && !g.hurtLastTick && g.hp < st.maxHp) g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.01));
-  if (b.dotT > 0 && foes[0]) { foes[0].hp -= Math.round(b.dot * dt * (g.cls === "shadow" ? 1.3 : 1) * (g.race === "emberkin" ? 1.25 : 1)); b.dotT -= dt; }
+  if (b.dotT > 0 && foes[0]) { foes[0].hp -= Math.round(b.dot * dt * (g.cls === "shadow" ? 1.3 : 1) * (g.race === "emberkin" ? 1.25 : 1) * foeElemMod(b.dotEl || null, foes[0])); b.dotT -= dt; }
 
   /* ---- item procs: on-hit ---- */
   const procs = eqProcs(g);
   if (foes.length) {
     if (procs.has("scorch") && b.dotT <= 0 && Math.random() < 0.12) {
-      b.dot = Math.round(st.atk * 0.6); b.dotT = 3;
+      b.dot = Math.round(st.atk * 0.6); b.dotT = 3; b.dotEl = "fire";
       fx.push({ id: floatSeq++, text: "Scorch", crit: false, side: "enemy" });
     }
     if (procs.has("frostbite") && b.slowT <= 0 && Math.random() < 0.12) {
@@ -1797,18 +2065,18 @@ function step(prev) {
       fx.push({ id: floatSeq++, text: "Frostbite", crit: false, side: "enemy" });
     }
     if (procs.has("stormbrand") && foes[0] && Math.random() < 0.1) {
-      const d2 = Math.max(1, Math.round(st.atk * 1.5 * rnd(0.85, 1.15)));
+      const d2 = Math.max(1, Math.round(st.atk * 1.5 * rnd(0.85, 1.15) * foeElemMod("storm", foes[0])));
       foes[0].hp -= d2;
       fx.push({ id: floatSeq++, text: "⚡−" + fmt(d2), crit: false, side: "enemy" });
     }
     if (procs.has("chainarc") && Math.random() < 0.08) {
       let tot = 0;
-      for (const foe2 of foes) { const d3 = Math.max(1, Math.round(st.atk * 0.9 * rnd(0.85, 1.15))); foe2.hp -= d3; tot += d3; }
+      for (const foe2 of foes) { const d3 = Math.max(1, Math.round(st.atk * 0.9 * rnd(0.85, 1.15) * foeElemMod("storm", foe2))); foe2.hp -= d3; tot += d3; }
       fx.push({ id: floatSeq++, text: "Arc −" + fmt(tot), crit: false, side: "enemy" });
     }
     if (procs.has("cindernova") && Math.random() < 0.06) {
       let tot = 0;
-      for (const foe2 of foes) { const d3 = Math.max(1, Math.round(st.atk * 1.3 * rnd(0.85, 1.15))); foe2.hp -= d3; tot += d3; }
+      for (const foe2 of foes) { const d3 = Math.max(1, Math.round(st.atk * 1.3 * rnd(0.85, 1.15) * foeElemMod("fire", foe2))); foe2.hp -= d3; tot += d3; }
       fx.push({ id: floatSeq++, text: "Nova −" + fmt(tot), crit: true, side: "enemy" });
     }
     if (procs.has("leechfang") && Math.random() < 0.1) {
@@ -1854,21 +2122,70 @@ function step(prev) {
   }
 
   /* ---- enemy turn: every living foe strikes ---- */
+  const heroDefEff = petCfg ? petCfg.heroDefMul : 1;
   if (g.splash || g.lvlfx) { g.enemies = foes; return g; }
   for (let i = 0; i < foes.length; i++) {
     const f = foes[i];
     if (f.stun > 0) { f.stun -= 1; continue; }
+    const petFront = petCfg && g.pet && g.pet.hp > 0 && g.formation !== "back";
+    if (f.isBoss) {
+      f.bsT = (f.bsT || 6) - dt;
+      if (f.bsT <= 0) {
+        f.bsT = 7;
+        f.bsN = (f.bsN || 0) + 1;
+        if (f.bsN % 2 === 1) {
+          const bel = f.el || "fire";
+          let bd2 = Math.max(1, Math.round(f.atk * 2.2 * rnd(0.9, 1.1) * (1 - playerRes(g, bel))));
+          if (petFront) {
+            g.pet.hp -= bd2;
+            fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息 −" + fmt(bd2), crit: true, side: "beast" });
+            if (g.pet.hp <= 0) { g.pet.hp = 0; g.pet.downT = 10; pushRibbon(g, petCfg.kind === "guardian" ? "THE GUARDIAN FALLS" : "YOUR BEAST FALLS", C.cinnabar); pushLog(g, "Your companion is struck down — it will return, in time.", "boss"); }
+          } else {
+            if (b.shield > 0) { const ab = Math.min(b.shield, bd2); b.shield -= ab; bd2 -= ab; }
+            if (bd2 > 0) { g.hp -= bd2; g.hurtLastTick = true; }
+            fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息 −" + fmt(Math.max(0, bd2)), crit: true, side: "player" });
+          }
+          pushLog(g, `${f.name} unleashes its ${ELEMENTS[bel].name} breath!`, "boss");
+        } else if (f.enrage < 1.3) {
+          f.enrage = +(f.enrage + 0.1).toFixed(2);
+          f.atk = Math.round(f.atk * 1.1);
+          pushRibbon(g, "THE BOSS RAGES", C.cinnabar);
+        }
+      }
+    }
     const slowed = (b.slowT > 0 ? 0.7 : 1) * (g.graveChill > 0 ? 0.92 : 1);
-    let edmg = Math.max(1, Math.round((f.atk * slowed * rnd(0.85, 1.15) - st.def * 0.6) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.88 : 1)));
+    if (petFront) {
+      const petDef = st.def * petCfg.petDefMul;
+      let edmgP = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) - petDef * 0.6));
+      if (f.el) edmgP = Math.max(1, Math.round(edmgP * (1 - playerRes(g, f.el))));
+      g.pet.hp -= edmgP;
+      fx.push({ id: floatSeq++, text: "−" + fmt(edmgP), crit: false, side: "beast" });
+      if (g.pet.hp <= 0) {
+        g.pet.hp = 0;
+        g.pet.downT = 10;
+        pushRibbon(g, petCfg.kind === "guardian" ? "THE GUARDIAN FALLS" : "YOUR BEAST FALLS", C.cinnabar);
+        pushLog(g, "Your companion is struck down — it will return, in time.", petCfg.kind === "guardian" ? "boss" : "kill");
+      }
+      continue;
+    }
+    let edmg = Math.max(1, Math.round((f.atk * slowed * rnd(0.85, 1.15) - st.def * heroDefEff * 0.6) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.88 : 1)));
     if (b.shield > 0) {
       const absorbed = Math.min(b.shield, edmg);
       b.shield -= absorbed;
       edmg -= absorbed;
     }
+    if (edmg > 0 && f.el) edmg = Math.max(1, Math.round(edmg * (1 - playerRes(g, f.el))));
     if (edmg > 0) {
       g.hp -= edmg;
       g.hurtLastTick = true;
-      fx.push({ id: floatSeq++, text: "−" + fmt(edmg), crit: false, side: "player" });
+      if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 8);
+      if (g.cls === "vowkeeper") {
+        const mul = (b.vowT > 0 ? 1.6 : 1);
+        const shock = Math.max(1, Math.round((edmg * 1.2 + st.atk * 0.35) * mul));
+        for (const f2 of foes) if (f2.hp > 0) f2.hp -= shock;
+        fx.push({ id: floatSeq++, text: "誓 −" + fmt(shock * Math.max(1, foes.length)), crit: b.vowT > 0, side: "enemy" });
+      }
+      fx.push({ id: floatSeq++, text: (f.el ? ELEMENTS[f.el].glyph : "") + "−" + fmt(edmg), crit: false, side: "player" });
       if (procs.has("stoneveil") && Math.random() < 0.1) {
         gainShield(st.maxHp * 0.12);
         fx.push({ id: floatSeq++, text: "⛨ Stoneveil", crit: false, side: "player", heal: true });
@@ -1894,7 +2211,7 @@ function step(prev) {
         }
       }
       g.hp = 0;
-      g.dead = g.bg === "deserter" ? 6 : 8;
+      g.dead = (g.bg === "deserter" ? 6 : 8) - (g.bg === "tide" ? 1 : 0);
       const lost = g.bg === "deserter" ? 0 : Math.round(g.gold * (g.race === "stoneborn" ? 0.085 : 0.1));
       g.gold -= lost;
       g.enemies = null;
@@ -1954,7 +2271,7 @@ function applyOffline(g) {
   const echoMult = 1 + (g.echoes || 0) * 0.01;
   const setB = setTiers(g).t;
   const setRewardMult = 1 + 0.06 * setB.binding + 0.04 * setB.chime;
-  const gold = Math.round(kills * eGold(mid) * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1.1 : 1) * (g.bg === "noble" ? 1.08 : 1));
+  const gold = Math.round(kills * eGold(mid) * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1.1 : 1) * (g.bg === "noble" ? 1.08 : 1) * (g.bg === "rod" ? 1.05 : 1));
   const xp = Math.round(kills * eXp(mid) * sc * (rmods.xp || 1) * echoMult * setRewardMult * (eqProcs(g).has("sagemind") ? 1.08 : 1) * (g.bg === "scholar" ? 1.1 : 1));
   g.gold += gold;
   g.xp += xp;
@@ -2037,6 +2354,10 @@ function migrate(raw) {
   g.vault = (Array.isArray(raw.vault) ? raw.vault : []).map((it) => normItem(backfillSet(it)));
   g.runes = raw.runes && typeof raw.runes === "object" ? { ...raw.runes } : {};
   g.pendingUpgrades = [];
+  g.rage = clamp(raw.rage || 0, 0, 100);
+  g.chrono = 0;
+  g.formation = raw.formation === "back" ? "back" : "front";
+  g.pet = raw.pet && typeof raw.pet === "object" ? { hp: Math.max(0, Math.round(raw.pet.hp || 0)), downT: Math.max(0, raw.pet.downT || 0) } : null;
   g.loadoutIdx = clamp(raw.loadoutIdx || 0, 0, 2);
   g.loadoutFocus = [0, 1, 2].map((i) => {
     const F = Array.isArray(raw.loadoutFocus) ? raw.loadoutFocus[i] : null;
@@ -2159,7 +2480,7 @@ function ItemIcon({ slot, color, size = 18 }) {
 
 function HeroFig({ cls, camping }) {
   const c = CLASSES[cls];
-  const weapon = { warrior: "sword", blademaster: "sword", mage: "staff", beastcaller: "staff", taoist: "whisk", monk: "fist", shadow: "sword", sentinel: "shield", ranger: "bow", berserker: "sword", warlock: "staff", cleric: "staff", samurai: "sword", druid: "staff", necromancer: "staff", spellblade: "sword" }[cls] || "sword";
+  const weapon = { warrior: "sword", blademaster: "sword", mage: "staff", beastcaller: "staff", taoist: "whisk", monk: "fist", shadow: "sword", sentinel: "shield", ranger: "bow", berserker: "sword", warlock: "staff", cleric: "staff", samurai: "sword", druid: "staff", necromancer: "staff", spellblade: "sword", ravager: "sword", vowkeeper: "whisk", chronomancer: "staff", stormcaller: "staff" }[cls] || "sword";
   if (camping) {
     return (
       <svg className="herofig" width="44" height="52" viewBox="0 0 44 52" fill="none" stroke="#e8dcc3" strokeWidth="2" strokeLinecap="round">
@@ -2189,7 +2510,7 @@ function HeroFig({ cls, camping }) {
 
 function FoeFig({ f, hurtKey }) {
   const scale = f.isBoss ? 1.5 : f.isElite ? 1.2 : f.inPack ? 0.85 : 1;
-  const col = f.isBoss ? "#c8452c" : f.isElite ? "#6c8fc4" : "#b8593f";
+  const col = f.el && ELEMENTS[f.el] ? ELEMENTS[f.el].color : f.isBoss ? "#c8452c" : f.isElite ? "#6c8fc4" : "#b8593f";
   return (
     <svg key={hurtKey} className={"foefig" + (f.isBoss ? " bossfig" : "")} width={40 * scale} height={44 * scale} viewBox="0 0 40 44" fill="none" stroke={col} strokeWidth="2.2" strokeLinecap="round">
       <path d="M13 10l-4-6M27 10l4-6" />
@@ -2205,6 +2526,16 @@ function BeastFig() {
     <svg className="beastfig" width="34" height="27" viewBox="0 0 34 27" fill="none" stroke="#a678c8" strokeWidth="2" strokeLinecap="round">
       <path d="M6 16q6-8 16-6l6-4-2 6 2 3-5 1q-3 6-9 6" />
       <path d="M10 20l-2 5M16 21v4M22 19l2 5M6 16l-4 3" />
+    </svg>
+  );
+}
+
+function GuardianFig() {
+  return (
+    <svg className="beastfig" width="30" height="34" viewBox="0 0 30 34" fill="none" stroke="#e0d08a" strokeWidth="2" strokeLinecap="round">
+      <circle cx="15" cy="8" r="4.4" />
+      <circle cx="15" cy="8" r="7.2" strokeWidth="1" opacity="0.5" />
+      <path d="M15 12.5v10M15 22l-5 9M15 22l5 9M9 16l6 2 6-2" />
     </svg>
   );
 }
@@ -2316,6 +2647,7 @@ function App() {
       if (s0) { g.trained = [s0.id]; g.skillsOn = [s0.id]; pushLog(g, `Temple drills endure: ${s0.name} is already yours.`, "buff"); }
     }
     if (pickBg === "smith") g.materials.glyph = 3;
+    if (pickBg === "pyre") g.essence = 5;
     if (g.echoes > 0) {
       pushLog(g, `Echoes of ${g.rebirths} past ${g.rebirths > 1 ? "lives" : "life"} hum within you: +${g.echoes}% XP & gold, +${(g.echoes * 0.5).toFixed(0)}% stats.`, "buff");
     }
@@ -2422,6 +2754,16 @@ function App() {
         pushLog(g, `${keep.length} attuned piece${keep.length > 1 ? "s" : ""} sealed in the vault — nothing melted.`, "sys");
       }
       g.inv = [];
+      return g;
+    });
+
+  const toggleFormation = () =>
+    mutate((g) => {
+      if (!companionCfg(g)) return g;
+      g.formation = g.formation === "back" ? "front" : "back";
+      pushLog(g, g.formation === "back"
+        ? "Your companion falls back — you take the blows now."
+        : "Your companion strides to the front line, shielding you.", "sys");
       return g;
     });
 
@@ -2834,6 +3176,35 @@ function App() {
       return g;
     });
 
+  const [elPick, setElPick] = useState("fire");
+
+  const wardInfusion = () =>
+    mutate((g) => {
+      const it = g.eq[forgeSlot];
+      if (!it) { pushLog(g, "Nothing is equipped in that slot.", "sys"); return g; }
+      const pct = +clamp((0.06 + it.rarity * 0.03), 0.06, 0.25).toFixed(2);
+      const goldC = Math.round(50 * costScale(it.tier) * (g.bg === "smith" ? 0.85 : 1) * (g.race === "ironkin" ? 0.88 : 1));
+      if ((g.materials.glyph || 0) < 2 || g.gold < goldC) { pushLog(g, `The ward asks 2× Glyph Dust and ${fmt(goldC)} gold.`, "sys"); return g; }
+      g.materials.glyph -= 2; g.gold -= goldC;
+      g.eq = { ...g.eq, [forgeSlot]: { ...it, res: { el: elPick, pct } } };
+      pushLog(g, `Warded: ${it.name} now resists ${ELEMENTS[elPick].name} ${Math.round(pct * 100)}%.`, "lvl");
+      return g;
+    });
+
+  const edgeInfusion = (chaos) =>
+    mutate((g) => {
+      const it = g.eq[forgeSlot];
+      if (!it || it.slot !== "weapon") { pushLog(g, "Only weapons take an elemental edge.", "sys"); return g; }
+      if (chaos && it.rarity < 6) { pushLog(g, "Only an Eternal blade can hold CHAOS.", "sys"); return g; }
+      const pct = chaos ? 0.5 : +clamp(0.2 + it.rarity * 0.05, 0.2, 0.45).toFixed(2);
+      const goldC = Math.round(70 * costScale(it.tier) * (g.bg === "smith" ? 0.85 : 1) * (g.race === "ironkin" ? 0.88 : 1));
+      if ((g.essence || 0) < 3 || (g.materials.glyph || 0) < 2 || g.gold < goldC) { pushLog(g, `The edge asks 3精, 2× Glyph Dust and ${fmt(goldC)} gold.`, "sys"); return g; }
+      g.essence -= 3; g.materials.glyph -= 2; g.gold -= goldC;
+      g.eq = { ...g.eq, [forgeSlot]: { ...it, infuse: chaos ? { el: "chaos", pct: 0.5 } : { el: elPick, pct } } };
+      pushLog(g, chaos ? `CHAOS bound: ${it.name} now strikes with a random element, half its weight.` : `Edged: ${it.name} converts ${Math.round(pct * 100)}% of each hit to ${ELEMENTS[elPick].name}.`, "lvl");
+      return g;
+    });
+
   const openPouch = () =>
     mutate((g) => {
       const t2 = g.zone + 1;
@@ -3145,8 +3516,10 @@ function App() {
           <div className={"heroSpot" + (g.dead > 0 ? " fallen" : "") + (lowHp ? " lowfig" : "")}>
             <HeroFig cls={g.cls} camping={g.camping} />
           </div>
-          {g.cls === "beastcaller" && !g.camping && g.dead === 0 && (
-            <div className="beastSpot"><BeastFig /></div>
+          {companionCfg(g) && !g.camping && g.dead === 0 && g.pet && g.pet.hp > 0 && (
+            <div className={"beastSpot" + (g.formation === "back" ? " backline" : "")}>
+              {companionCfg(g).kind === "guardian" ? <GuardianFig /> : <BeastFig />}
+            </div>
           )}
           {fighting && lastEnemyFx && (
             <svg key={"s" + lastEnemyFx.id} className={"slashfx" + (lastEnemyFx.crit ? " critslash" : "")} width="46" height="46" viewBox="0 0 46 46" fill="none" strokeLinecap="round">
@@ -3224,20 +3597,33 @@ function App() {
           </div>
         </div>
 
-        {g.cls === "beastcaller" && (
-          <div className="beastrow">
-            <span className="beastglyph">{beastForm(g.level).glyph}</span>
-            <span className="mono tiny" style={{ color: C.violet }}>{beastForm(g.level).name}</span>
-            <span className="mono tiny dim">
-              {g.camping ? "dozing by the fire" : g.dead > 0 ? "standing guard over you" : g.enemies ? "fighting at your side" : "prowling…"}
-            </span>
-            <div className="floatzone beastfloats">
-              {(g.fx || []).filter((f) => f.side === "beast").map((f) => (
-                <span key={f.id} className="float beasthit">{f.text}</span>
-              ))}
+        {companionCfg(g) && (() => {
+          const ccfg = companionCfg(g);
+          const cform = companionForm(g);
+          const pcap = petMaxOf(g, st);
+          const pet = g.pet || { hp: pcap, downT: 0 };
+          const ccol = ccfg.kind === "guardian" ? "#e0d08a" : C.violet;
+          return (
+            <div className="beastrow">
+              <span className="beastglyph" style={{ color: ccol, textShadow: `0 0 8px ${ccol}88` }}>{cform.glyph}</span>
+              <span className="mono tiny" style={{ color: ccol }}>{cform.name}</span>
+              <div className="petbar">
+                <Bar cur={Math.max(0, pet.hp)} max={pcap} color={pet.hp <= 0 ? "#565d6d" : ccol} height={5} />
+              </div>
+              <span className="mono tiny dim">
+                {pet.hp <= 0 ? `returns ${Math.ceil(pet.downT)}s` : `${fmt(Math.max(0, pet.hp))}`}
+              </span>
+              <button className="chip formchip" onClick={toggleFormation}>
+                {g.formation === "back" ? "⇠ back line" : "front line ⇢"}
+              </button>
+              <div className="floatzone beastfloats">
+                {(g.fx || []).filter((f) => f.side === "beast").map((f) => (
+                  <span key={f.id} className={"float beasthit" + (f.heal ? " healf" : "")}>{f.text}</span>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         <div className="meters">
           <div className="buffrow mono">
@@ -3265,6 +3651,13 @@ function App() {
             </div>
             <span className="meterval mono dim">{fmt(g.xp)}/{fmt(xpNeed(g.level))}</span>
           </div>
+          {g.cls === "ravager" && (
+            <div className="meterrow">
+              <span className="meterlabel mono" style={{ color: "#d14b2f" }}>怒 rage</span>
+              <div className="meterbar"><Bar cur={g.rage || 0} max={100} color="#d14b2f" height={5} /></div>
+              <span className="meterval mono" style={{ color: "#d14b2f" }}>{Math.round(g.rage || 0)}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -3373,6 +3766,12 @@ function App() {
                 </div>
               ))}
               <div className="tiny dim" style={{ marginTop: 4 }}>Speed above 1.0 is the chance of an extra basic strike each tick; two-handers trade speed for heavier blows and seal the offhand while gripped. Each class masters certain types for +10% weapon damage — Warrior: sword/greatsword/glaive · Blademaster: sword/saber/dagger (and may wield a second one-hander, striking with both) · Mage: staff/whisk · Taoist: fists/whisk/staff · Beastcaller: saber/glaive/dagger · Monk: fists/staff/whisk · Shadow: dagger/saber · Sentinel: sword/glaive · Ranger: dagger/saber · Berserker: greatsword/glaive/saber · Warlock, Cleric, Necromancer: staff/whisk · Samurai: sword/saber · Druid: staff/fist · Spellblade: sword/saber/staff. Fist weapons are hand-to-hand: two-handed yet fastest of all.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>Companions &amp; formation</div>
+              <div className="tiny dim">Beastcallers and Clerics fight through a partner: the companion carries a SHARE of your power (its strikes and HP scale with your stats) while your own numbers are reduced to pay for it — the Cleric most of all, a pure healer at 35% ATK whose Votive Guardian bears 85%. Companions have real HP shown beside the battle: they can FALL (returning after ≈ six beats, or nursed faster at the campfire), and Cleric healing mends them alongside you. Tap the chip on the companion row to set the formation — <b>front line</b> puts your partner ahead to soak every enemy strike and boss breath; <b>back line</b> tucks it behind you so the blows land on you instead. The Cleric's Martyr's Communion transforms grief into might: castable only while the Guardian lies fallen.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>The Four Elements</div>
+              <div className="tiny dim">The wheel: <b style={{ color: "#e0562f" }}>火 Fire</b> scorches <b style={{ color: "#b08d4f" }}>土 Earth</b>, Earth grounds <b style={{ color: "#6c8fc4" }}>雷 Storm</b>, Storm rides <b style={{ color: "#5fa8c8" }}>水 Water</b>, Water douses Fire. Striking with the winning element deals ×1.3; striking into your counter, ×0.75. Neutral damage ignores the wheel.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Aligned foes (65% of lesser spawns) bear a glyph, hit 8% harder, deal their element (your resistances blunt it, cap 75%), and RESIST their own element by menace: normals 20%, Elites 45% — and every zone boss is fully IMMUNE to its own element, so bring the counter or neutral steel. Bosses also breathe: heavy elemental bursts on a cadence, and rage when denied.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Your elemental tools: skills marked with a glyph strike as that element whole. Gear from Rare up may carry a <b>ward</b> (土res12%); weapons from Epic up may carry an <b>edge</b> converting a share of every hit (火infuse30%) — Eternal blades can bind <b>CHAOS</b>: a random element per trigger at 50%. Both can be set at the bench. Elemental bloodlines and past lives add resistance beneath it all.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The rules of the pack</div>
               <div className="tiny dim">Pure upgrades (nothing lower, something higher) equip themselves and melt the old piece. Sidegrades that score higher but lose a stat wait in your pack. Everything else melts to gold. Each zone boss guards a full relic set — one signature piece for every slot; 25% chance per kill to claim a random piece.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Boss souls</div>
@@ -3699,6 +4098,20 @@ function App() {
                     {filledN === avail.length ? `Re-roll ${avail.length} trait${avail.length > 1 ? "s" : ""}` : filledN === 0 ? `Enchant (${avail.length} slot${avail.length > 1 ? "s" : ""})` : `Fill ${nS} open slot${nS > 1 ? "s" : ""}`} — {2 * nS}× Dust + {3 * nS}精 + {fmt(goldC)}g
                   </button>
                 )}
+                <div className="guidetitle" style={{ marginTop: 8 }}>Elemental work</div>
+                <div className="focusrow">
+                  {EL_KEYS.map((ek) => (
+                    <button key={ek} className={"chip" + (elPick === ek ? " on" : "")} style={{ borderColor: ELEMENTS[ek].color, color: elPick === ek ? ELEMENTS[ek].color : undefined }} onClick={() => setElPick(ek)}>
+                      {ELEMENTS[ek].glyph} {ELEMENTS[ek].name}
+                    </button>
+                  ))}
+                </div>
+                <div className="skillacts" style={{ margin: 0 }}>
+                  <button className="btn tiny" onClick={wardInfusion}>Ward — resist {ELEMENTS[elPick].glyph}</button>
+                  {eit.slot === "weapon" && <button className="btn tiny" onClick={() => edgeInfusion(false)}>Edge — infuse {ELEMENTS[elPick].glyph}</button>}
+                  {eit.slot === "weapon" && eit.rarity >= 6 && <button className="btn tiny ghost" onClick={() => edgeInfusion(true)}>CHAOS edge</button>}
+                </div>
+                <div className="tiny dim">Ward sets one resistance on the piece (replaces any prior ward). Edge converts a share of every weapon hit into the chosen element — Eternal blades may bind CHAOS: a random element per trigger at 50%.</div>
                 {Object.keys(g.runes || {}).length > 0 && (
                   <>
                     <div className="guidetitle" style={{ marginTop: 6 }}>Sealed runes</div>
@@ -3897,6 +4310,7 @@ function App() {
             <div className="tiny dim" style={{ textAlign: "left", lineHeight: 1.6 }}>
               <div>{cls.passive}</div>
               <div>Bloodline: {raceInfo.modText}</div>
+              <div>Resist: {EL_KEYS.map((ek) => `${ELEMENTS[ek].glyph}${Math.round(playerRes(g, ek) * 100)}%`).join(" · ")}</div>
               <div>Past life: {bgInfo.passive}</div>
               {(g.echoes || 0) > 0 && <div>Echoes: +{g.echoes}% XP &amp; gold · +{(g.echoes * 0.5).toFixed(0)}% stats</div>}
               {Object.entries(setTiers(g).detail).filter(([, d]) => d.count >= 1).map(([sIdx, d]) => (
@@ -4076,13 +4490,17 @@ const CSS = `
 .bar { background: rgba(0,0,0,0.45); border-radius: 4px; overflow: hidden; }
 .barfill { height: 100%; transition: width 0.35s ease; border-radius: 4px; }
 .playerbox { position: relative; height: 40px; margin-top: 6px; }
-.beastrow { height: 20px; display: flex; align-items: center; gap: 8px; margin-top: 4px; position: relative; }
+.beastrow { height: 22px; display: flex; align-items: center; gap: 7px; margin-top: 4px; position: relative; }
 .beastglyph {
   font-family: 'Marcellus', serif; color: ${C.violet}; font-size: 14px; line-height: 1;
   text-shadow: 0 0 8px rgba(166,120,200,0.6); animation: beastbob 2.4s ease-in-out infinite;
 }
 @keyframes beastbob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 .beastfloats { top: -4px; }
+.petbar { flex: 1; max-width: 84px; }
+.formchip { font-size: 9px; padding: 1px 7px; flex-shrink: 0; }
+.beastSpot.backline { left: 2px; opacity: 0.85; z-index: 0; }
+.float.beasthit.healf { color: ${C.jade}; }
 .float.beasthit { color: ${C.violet}; }
 .deadtext { font-family: 'Marcellus', serif; color: ${C.cinnabar}; font-size: 16px; margin-bottom: 2px; }
 .meters { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
