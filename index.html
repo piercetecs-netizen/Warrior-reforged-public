@@ -1584,6 +1584,22 @@ function rewardFoe(g, f, st) {
 
 /* ---------------- combat step (one tick) ---------------- */
 
+/* tactical brain: derived from what each skill actually does. Sustain fires
+   on need, buffs refresh only when faded, DPS respects target quality — and
+   rage economics get their own rules (see the gate in the cast loop). */
+const TACT = {
+  atkBuffs: new Set(["arcanesurge", "blessing", "bloodpact", "bloodroar", "bushido", "deathpact", "deathspoem", "fury", "hawkeye", "innerfire", "laststand", "momentum", "nightembrace", "packhowl", "painfeast", "soulburn", "warcry2", "wildshape"]),
+  critBuffs: new Set(["arcane", "arcanesurge", "bushido", "deathpact", "deathspoem", "hawkeye", "ioncharge", "momentum", "nightembrace", "soulburn"]),
+  vowBuffs: new Set(["vowward"]),
+  shields: new Set(["aegis", "barkskin", "bearhide", "blessing", "bulwark2", "camostep", "ironbody", "ironskin", "manaward", "parryflow", "parrystance", "resurrection", "sanctuary", "sanctum", "smokeveil", "staticveil", "stillmind", "unbreakable", "ward"]),
+  debuffs: new Set(["challenge", "curse", "graspdead", "patience", "warcry2"]),
+  dots: new Set(["bleedingedge", "envenom", "flamestrike", "hex", "plaguetouch", "serpentarrow", "serpentvenom", "soulflame"]),
+  lateHeals: new Set(["graceful", "regrowth", "reversal"]),
+  bigHeals: new Set(["laststand", "painfeast", "resurrection"]),
+  nukePw: {ancestorfist: 10.0, annihilate: 11.0, beastking: 8.0, berserkrush: 12.5, falconvolley: 11.5, finalcut: 12.0, paradox: 12.0, stormlance: 5.2, titanwrath: 9.0},
+  aoeBig: new Set(["apocalypse", "avatar", "cataclysm", "finalvow", "meteor", "ragequake", "skyfall", "spellstorm", "supernova"]),
+};
+
 function step(prev) {
   if (prev.paused) return prev;
   RARITY_LUCK = prev.bg === "gambler" ? 0.25 : 0;
@@ -1718,6 +1734,12 @@ function step(prev) {
   const critDmg = g.cls === "blademaster" ? 2.1 : 1.8;
   const gainShield = (amt) => { b.shield = Math.max(b.shield, Math.round(amt * (g.cls === "sentinel" ? 1.5 : 1) * (g.race === "dragonblood" ? 1.2 : 1))); };
   const healMul = g.cls === "cleric" ? 1.4 : 1;
+  /* conditional heals fire when YOU need mending — or your companion does */
+  const needsHealing = (frac) => {
+    if (g.hp < st.maxHp * frac) return true;
+    if (petCfg && g.pet && g.pet.hp > 0 && g.pet.hp < petMaxOf(g, st) * frac) return true;
+    return false;
+  };
   const heal = (frac) => {
     const amt = Math.round(st.maxHp * frac * healMul);
     g.hp = Math.min(st.maxHp, g.hp + amt);
@@ -1787,6 +1809,34 @@ function step(prev) {
     if (g.cls === "ravager") {
       if ((g.rage || 0) < sk.cd * 4) continue;
     } else if ((g.cds[sid] || 0) > 0) continue;
+    /* ---- strategic gate: effectiveness over spam ----
+       Sustain casts on need; buffs only when faded; big DPS respects the
+       target (no nukes on dying trash, no grand AOE on a lone straggler).
+       Ravager economics differ: near-cap rage DUMPS freely (overcap is
+       waste), while big finishers are reserved for worthy prey below it. */
+    {
+      const worthy = foes[0] && (foes[0].isBoss || foes[0].isElite);
+      const frontHp = foes[0] ? foes[0].hp : 0;
+      const overflowing = g.cls === "ravager" && (g.rage || 0) >= 90;
+      const berserkerish = g.cls === "berserker"; // bloodrage WANTS low HP
+      const flags = [];
+      if (TACT.atkBuffs.has(sid)) flags.push(b.atkT <= 2);
+      if (TACT.critBuffs.has(sid)) flags.push(b.critT <= 2);
+      if (TACT.vowBuffs.has(sid)) flags.push((b.vowT || 0) <= 2);
+      if (TACT.shields.has(sid)) flags.push(b.shield <= st.maxHp * 0.25);
+      if (TACT.debuffs.has(sid)) flags.push(b.slowT <= 2 && foes.length > 0);
+      if (TACT.lateHeals.has(sid)) flags.push(needsHealing(berserkerish ? 0.4 : 0.85));
+      if (TACT.bigHeals.has(sid)) flags.push(needsHealing(berserkerish ? 0.35 : 0.55));
+      if (flags.length && !flags.some(Boolean)) continue; // nothing this cast would improve
+      if (!foes.length && !flags.length) continue; // pure damage with no one to hit: never burn the cooldown
+      if (foes.length) {
+        if (TACT.dots.has(sid) && (b.dotT > 1.5 || (!worthy && frontHp < baseAtk * 1.2))) continue;
+        const npw = TACT.nukePw[sid];
+        if (npw && !worthy && frontHp < baseAtk * 1.6 && !overflowing) continue; // basics will finish it
+        if (TACT.aoeBig.has(sid) && foes.length === 1 && !foes[0].isBoss && !overflowing) continue;
+        if (g.cls === "ravager" && sk.cd * 4 >= 60 && !worthy && !overflowing) continue; // hold the finisher
+      }
+    }
     let cast = true;
     const skDef = SKILLS.find((s2) => s2.id === sid);
     const skEl = (skDef && skDef.el) || SKILL_EL[sid] || null;
@@ -1802,7 +1852,7 @@ function step(prev) {
       case "arcane": b.critAdd = 25; b.critT = 6; pushLog(g, "Arcane Mind sharpens.", "buff"); break;
       case "meteor": dealAllE(7, "Meteor"); break;
       case "heal":
-        if (g.hp < st.maxHp * 0.75) heal(0.25);
+        if (needsHealing(0.75)) heal(0.25);
         else cast = false;
         break;
       case "soulflame": b.dot = Math.round(st.atk * 0.8); b.dotT = 4; pushLog(g, "Soul Flame clings to the foe.", "buff"); break;
@@ -1813,10 +1863,8 @@ function step(prev) {
         break;
       case "thunder": dealFrontE(4.5, "Thunder"); if (foes[0]) foes[0].stun = 2; break;
       case "secondwind":
-        if (g.hp < st.maxHp * 0.5) {
-          g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.2));
-          fx.push({ id: floatSeq++, text: "+" + fmt(st.maxHp * 0.2), crit: false, side: "player", heal: true });
-        } else cast = false;
+        if (needsHealing(0.5)) heal(0.2);
+        else cast = false;
         break;
       case "whirlwind": dealAllE(4, "Whirlwind"); break;
       case "titanwrath": dealFrontE(9, "Titan's Wrath"); break;
@@ -1834,10 +1882,8 @@ function step(prev) {
       case "aegis": gainShield(st.maxHp * 0.4); pushLog(g, "Jade Aegis shimmers into being.", "buff"); break;
       case "thunders5": dealAllE(3.8, "Thunders"); if (foes[0]) foes[0].stun = 2; break;
       case "breath":
-        if (g.hp < st.maxHp * 0.6) {
-          g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.4));
-          fx.push({ id: floatSeq++, text: "+" + fmt(st.maxHp * 0.4), crit: false, side: "player", heal: true });
-        } else cast = false;
+        if (needsHealing(0.6)) heal(0.4 / healMul);
+        else cast = false;
         break;
       case "twinfangs": dealFrontE(1.3, "Fang"); dealFrontE(1.3, "Fang"); break;
       case "parryflow": gainShield(st.maxHp * 0.2); pushLog(g, "You settle into the parry flow.", "buff"); break;
@@ -1867,8 +1913,7 @@ function step(prev) {
       case "cyclone": dealAllE(3.3, "Cyclone"); break;
       case "innerfire":
         b.atkMult = 1.3; b.atkT = 6;
-        g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.15));
-        fx.push({ id: floatSeq++, text: "+" + fmt(st.maxHp * 0.15), crit: false, side: "player", heal: true });
+        heal(0.15);
         break;
       case "ancestorfist": dealFrontE(10, "Ancestors"); break;
       case "shadowcut": dealFrontE(2.5, "Shadow"); break;
@@ -1885,7 +1930,7 @@ function step(prev) {
       case "shieldwave": dealAllE(2.8, "Wave"); gainShield(st.maxHp * 0.12); break;
       case "unbreakable":
         gainShield(st.maxHp * 0.5);
-        g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.12));
+        heal(0.12);
         pushLog(g, "Unbreakable — the wall holds.", "buff");
         break;
       case "aimedshot": dealFrontE(2.8, "Aimed"); break;
@@ -1910,7 +1955,7 @@ function step(prev) {
       case "soulburn": b.atkMult = 1.25; b.atkT = 6; b.critAdd = 20; b.critT = 6; pushLog(g, "Soul burns bright.", "buff"); break;
       case "cataclysm": dealAllE(10, "Cataclysm"); break;
       case "smite": dealFrontE(2.5, "Smite"); break;
-      case "renew": if (g.hp < st.maxHp * 0.75) heal(0.25); else cast = false; break;
+      case "renew": if (needsHealing(0.75)) heal(0.25); else cast = false; break;
       case "blessing": gainShield(st.maxHp * 0.25); b.atkMult = 1.2; b.atkT = 5; pushLog(g, "A blessing steadies you.", "buff"); break;
       case "holynova": dealAllE(2.6, "Nova"); heal(0.12); break;
       case "sanctuary": gainShield(st.maxHp * 0.4); heal(0.15); pushLog(g, "Sanctuary surrounds you.", "buff"); break;
@@ -3607,15 +3652,19 @@ function App() {
             <div className="beastrow">
               <span className="beastglyph" style={{ color: ccol, textShadow: `0 0 8px ${ccol}88` }}>{cform.glyph}</span>
               <span className="mono tiny" style={{ color: ccol }}>{cform.name}</span>
-              <div className="petbar">
-                <Bar cur={Math.max(0, pet.hp)} max={pcap} color={pet.hp <= 0 ? "#565d6d" : ccol} height={5} />
-              </div>
-              <span className="mono tiny dim">
-                {pet.hp <= 0 ? `returns ${Math.ceil(pet.downT)}s` : `${fmt(Math.max(0, pet.hp))}`}
-              </span>
               <button className="chip formchip" onClick={toggleFormation}>
                 {g.formation === "back" ? "⇠ back line" : "front line ⇢"}
               </button>
+              <div className="petstats mono tiny">
+                <div className="petbar">
+                  <Bar cur={Math.max(0, pet.hp)} max={pcap} color={pet.hp <= 0 ? "#565d6d" : ccol} height={5} />
+                </div>
+                <span className="dim">
+                  {pet.hp <= 0
+                    ? `fallen · returns ${Math.ceil(pet.downT)}s`
+                    : `HP ${fmt(Math.max(0, pet.hp))}/${fmt(pcap)} · ATK ${fmt(Math.round(st.atk * ccfg.atkShare))} · DEF ${fmt(Math.round(st.def * ccfg.petDefMul))}`}
+                </span>
+              </div>
               <div className="floatzone beastfloats">
                 {(g.fx || []).filter((f) => f.side === "beast").map((f) => (
                   <span key={f.id} className={"float beasthit" + (f.heal ? " healf" : "")}>{f.text}</span>
@@ -3766,6 +3815,8 @@ function App() {
                 </div>
               ))}
               <div className="tiny dim" style={{ marginTop: 4 }}>Speed above 1.0 is the chance of an extra basic strike each tick; two-handers trade speed for heavier blows and seal the offhand while gripped. Each class masters certain types for +10% weapon damage — Warrior: sword/greatsword/glaive · Blademaster: sword/saber/dagger (and may wield a second one-hander, striking with both) · Mage: staff/whisk · Taoist: fists/whisk/staff · Beastcaller: saber/glaive/dagger · Monk: fists/staff/whisk · Shadow: dagger/saber · Sentinel: sword/glaive · Ranger: dagger/saber · Berserker: greatsword/glaive/saber · Warlock, Cleric, Necromancer: staff/whisk · Samurai: sword/saber · Druid: staff/fist · Spellblade: sword/saber/staff. Fist weapons are hand-to-hand: two-handed yet fastest of all.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>How skills choose their moment</div>
+              <div className="tiny dim">Woven skills no longer fire the instant they're ready — they wait for the moment they matter. Sustain casts on NEED (heals when you or your companion are hurt — Berserkers cling to their wounds far longer, since bloodrage feeds on them); buffs recast only once the old one fades; running afflictions aren't clobbered; shields aren't stacked onto a full ward. DPS respects the target: great nukes hold when a basic strike would finish common prey (Elites and bosses always merit them), and grand AOE waits for a pack — or a boss — rather than one straggler. Nothing ever burns a cooldown into empty air, though shields and mending may be laid between waves. Rage runs its own economy: the Ravager reserves 60+ rage finishers for worthy prey — but at 90+ rage it DUMPS freely, because capped rage is rage wasted. A held skill costs nothing: no cooldown, no rage.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Companions &amp; formation</div>
               <div className="tiny dim">Beastcallers and Clerics fight through a partner: the companion carries a SHARE of your power (its strikes and HP scale with your stats) while your own numbers are reduced to pay for it — the Cleric most of all, a pure healer at 35% ATK whose Votive Guardian bears 85%. Companions have real HP shown beside the battle: they can FALL (returning after ≈ six beats, or nursed faster at the campfire), and Cleric healing mends them alongside you. Tap the chip on the companion row to set the formation — <b>front line</b> puts your partner ahead to soak every enemy strike and boss breath; <b>back line</b> tucks it behind you so the blows land on you instead. The Cleric's Martyr's Communion transforms grief into might: castable only while the Guardian lies fallen.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Four Elements</div>
@@ -3942,6 +3993,7 @@ function App() {
                   <span className="mono tiny dim">
                     {locked ? `unlocks Lv ${s.lv}`
                       : !trained ? (inTraining ? "in training" : `train · ${s.tt}s`)
+                      : g.cls === "ravager" ? (on ? ((g.rage || 0) >= s.cd * 4 ? `怒${s.cd * 4} · primed` : `怒${s.cd * 4} · building`) : `怒${s.cd * 4}`)
                       : on ? (cd > 0 ? `cd ${cd.toFixed(0)}s` : "woven") : "ready"}
                   </span>
                 </div>
@@ -4311,6 +4363,16 @@ function App() {
               <div>{cls.passive}</div>
               <div>Bloodline: {raceInfo.modText}</div>
               <div>Resist: {EL_KEYS.map((ek) => `${ELEMENTS[ek].glyph}${Math.round(playerRes(g, ek) * 100)}%`).join(" · ")}</div>
+              {companionCfg(g) && (() => {
+                const cc = companionCfg(g);
+                const pc = petMaxOf(g, st);
+                const pp = g.pet || { hp: pc, downT: 0 };
+                return (
+                  <div style={{ color: cc.kind === "guardian" ? "#e0d08a" : C.violet }}>
+                    Companion — {companionForm(g).name}: ATK {fmt(Math.round(st.atk * cc.atkShare))}/strike ({Math.round(cc.atkShare * 100)}% share) · HP {fmt(Math.max(0, pp.hp))}/{fmt(pc)} · DEF {fmt(Math.round(st.def * cc.petDefMul))} · {pp.hp <= 0 ? `fallen, returns ${Math.ceil(pp.downT)}s` : g.formation === "back" ? "back line" : "front line"} · your hand: {Math.round(cc.heroAtkMul * 100)}% ATK, {Math.round(cc.heroDefMul * 100)}% DEF
+                  </div>
+                );
+              })()}
               <div>Past life: {bgInfo.passive}</div>
               {(g.echoes || 0) > 0 && <div>Echoes: +{g.echoes}% XP &amp; gold · +{(g.echoes * 0.5).toFixed(0)}% stats</div>}
               {Object.entries(setTiers(g).detail).filter(([, d]) => d.count >= 1).map(([sIdx, d]) => (
@@ -4490,7 +4552,8 @@ const CSS = `
 .bar { background: rgba(0,0,0,0.45); border-radius: 4px; overflow: hidden; }
 .barfill { height: 100%; transition: width 0.35s ease; border-radius: 4px; }
 .playerbox { position: relative; height: 40px; margin-top: 6px; }
-.beastrow { height: 22px; display: flex; align-items: center; gap: 7px; margin-top: 4px; position: relative; }
+.beastrow { height: 36px; display: flex; align-items: center; gap: 7px; margin-top: 4px; position: relative; flex-wrap: wrap; }
+.petstats { flex-basis: 100%; display: flex; align-items: center; gap: 7px; height: 13px; }
 .beastglyph {
   font-family: 'Marcellus', serif; color: ${C.violet}; font-size: 14px; line-height: 1;
   text-shadow: 0 0 8px rgba(166,120,200,0.6); animation: beastbob 2.4s ease-in-out infinite;
