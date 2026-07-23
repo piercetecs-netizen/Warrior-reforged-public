@@ -28,7 +28,7 @@ const TICK_MS = 600;
 const SAVE_KEY = "war-reforged-save-v1";
 const ECHO_KEY = "war-reforged-echoes";
 const INV_CAP = 40;
-const SAVE_VER = 3;
+const SAVE_VER = 4;
 
 /* storage adapter — uses Claude's artifact storage when available, and falls
    back to the browser's localStorage when the game is published on the web.
@@ -140,14 +140,14 @@ const SLOT_KEYS = Object.keys(SLOTS);
 /* weapon types: speed vs damage profiles. 1H strike faster (chance of an
    extra hit each tick), 2H hit harder but occupy BOTH weapon and offhand. */
 const WEAPON_TYPES = {
-  sword: { name: "Sword", hands: 1, spd: 1.0, dmg: 1.0, nouns: ["Sword", "Jian", "Straightblade", "Edge"] },
-  saber: { name: "Saber", hands: 1, spd: 1.1, dmg: 0.92, nouns: ["Saber", "Dao", "Willow Blade", "Moon Curve"] },
-  dagger: { name: "Daggers", hands: 1, spd: 1.35, dmg: 0.78, nouns: ["Daggers", "Twin Points", "Fang Blades"] },
-  whisk: { name: "Fly-Whisk", hands: 1, spd: 1.05, dmg: 0.95, nouns: ["Fly-Whisk", "Horsetail Whisk", "Cloud Whisk"] },
-  glaive: { name: "Glaive", hands: 2, spd: 0.8, dmg: 1.15, nouns: ["Glaive", "Guandao", "Halberd", "War Scythe"] },
-  greatsword: { name: "Greatsword", hands: 2, spd: 0.72, dmg: 1.22, nouns: ["Greatsword", "Mountain Cleaver", "Tomb Blade"] },
-  staff: { name: "Staff", hands: 2, spd: 0.85, dmg: 1.12, nouns: ["Staff", "Ringed Staff", "Spirit Rod"] },
-  fist: { name: "Fist Weapons", hands: 2, spd: 1.45, dmg: 0.82, nouns: ["Hand Wraps", "Iron Fists", "Tiger Claws", "Cord-Bound Fists"] },
+  sword: { dcls: "slash", name: "Sword", hands: 1, spd: 1.0, dmg: 1.0, nouns: ["Sword", "Jian", "Straightblade", "Edge"] },
+  saber: { dcls: "slash", name: "Saber", hands: 1, spd: 1.1, dmg: 0.92, nouns: ["Saber", "Dao", "Willow Blade", "Moon Curve"] },
+  dagger: { dcls: "pierce", name: "Daggers", hands: 1, spd: 1.35, dmg: 0.78, nouns: ["Daggers", "Twin Points", "Fang Blades"] },
+  whisk: { dcls: "blunt", name: "Fly-Whisk", hands: 1, spd: 1.05, dmg: 0.95, nouns: ["Fly-Whisk", "Horsetail Whisk", "Cloud Whisk"] },
+  glaive: { dcls: "pierce", name: "Glaive", hands: 2, spd: 0.8, dmg: 1.15, nouns: ["Glaive", "Guandao", "Halberd", "War Scythe"] },
+  greatsword: { dcls: "slash", name: "Greatsword", hands: 2, spd: 0.72, dmg: 1.22, nouns: ["Greatsword", "Mountain Cleaver", "Tomb Blade"] },
+  staff: { dcls: "blunt", name: "Staff", hands: 2, spd: 0.85, dmg: 1.12, nouns: ["Staff", "Ringed Staff", "Spirit Rod"] },
+  fist: { dcls: "blunt", name: "Fist Weapons", hands: 2, spd: 1.45, dmg: 0.82, nouns: ["Hand Wraps", "Iron Fists", "Tiger Claws", "Cord-Bound Fists"] },
 };
 const CLASS_MASTERY = {
   warrior: ["sword", "greatsword", "glaive"],
@@ -173,6 +173,96 @@ const CLASS_MASTERY = {
 };
 const isTwoH = (it) => !!(it && it.wtype && WEAPON_TYPES[it.wtype] && WEAPON_TYPES[it.wtype].hands === 2);
 const masteryOf = (g, it) => !!(it && it.wtype && (CLASS_MASTERY[g.cls] || []).includes(it.wtype));
+
+/* ---- how a weapon wounds, and what a school will carry ----
+   Every weapon strikes as SLASH, PIERCE or BLUNT. A school trains in some and
+   refuses others: a cleric keeps to the staff and whisk and will not carry an
+   edge; a samurai answers only with the cut. Mastery (above) is a bonus atop
+   this — training is permission, mastery is excellence. */
+const DAMAGE_CLASSES = {
+  slash: { name: "Slash", glyph: "刃", color: "#c8452c", blurb: "cuts — blades and cleaving edges" },
+  pierce: { name: "Pierce", glyph: "刺", color: "#6c8fc4", blurb: "thrusts — points, fangs and polearms" },
+  blunt: { name: "Blunt", glyph: "捶", color: "#b08d4f", blurb: "strikes — staves, whisks and bare hands" },
+};
+const DCLS_KEYS = Object.keys(DAMAGE_CLASSES);
+const CLASS_WEAPONS = {
+  warrior: ["slash", "pierce"],
+  blademaster: ["slash", "pierce"],
+  mage: ["blunt"],
+  taoist: ["blunt"],
+  beastcaller: ["slash", "pierce"],
+  monk: ["blunt"],
+  shadow: ["pierce", "slash"],
+  sentinel: ["slash", "pierce"],
+  ranger: ["pierce", "slash"],
+  berserker: ["slash", "pierce"],
+  warlock: ["blunt"],
+  cleric: ["blunt"],
+  samurai: ["slash"],
+  druid: ["blunt"],
+  necromancer: ["blunt"],
+  spellblade: ["slash", "blunt"],
+  ravager: ["slash", "pierce", "blunt"],
+  vowkeeper: ["blunt"],
+  chronomancer: ["blunt", "pierce"],
+  stormcaller: ["blunt", "slash"],
+};
+
+/* ---- armor weights ----
+   Worn plate has a WEIGHT, and weight decides the shape of its virtues: robes
+   trade shelter for power, plate trades power for shelter. A school wears what
+   it was taught to move in. */
+const ARMOR_SLOTS = ["armor", "helm", "pauldrons", "greaves", "bracers", "gloves", "boots"];
+const ARMOR_TYPES = {
+  robe: { name: "Robe", glyph: "袍", color: "#9a7fc0", hp: 0.88, def: 0.7, atk: 1.45, crit: 1.3, note: "cloth — least shelter, most power" },
+  light: { name: "Light", glyph: "轻", color: "#6fb98f", hp: 0.94, def: 0.85, atk: 1.2, crit: 1.25, note: "hide and silk — swift, keen-edged" },
+  medium: { name: "Medium", glyph: "中", color: "#c8a45f", hp: 1.05, def: 1.05, atk: 1, crit: 1, note: "scale and lamellar — balanced" },
+  heavy: { name: "Heavy", glyph: "重", color: "#8fa3b8", hp: 1.12, def: 1.25, atk: 0.88, crit: 0.8, note: "iron plate — greatest shelter, least edge" },
+};
+const ARMOR_KEYS = Object.keys(ARMOR_TYPES);
+const CLASS_ARMOR = {
+  warrior: ["medium", "heavy"],
+  blademaster: ["light", "medium"],
+  mage: ["robe"],
+  taoist: ["robe", "light"],
+  beastcaller: ["light", "medium"],
+  monk: ["robe", "light"],
+  shadow: ["light"],
+  sentinel: ["medium", "heavy"],
+  ranger: ["light", "medium"],
+  berserker: ["medium", "heavy"],
+  warlock: ["robe"],
+  cleric: ["robe", "light"],
+  samurai: ["medium", "heavy"],
+  druid: ["robe", "light", "medium"],
+  necromancer: ["robe"],
+  spellblade: ["light", "medium"],
+  ravager: ["medium", "heavy"],
+  vowkeeper: ["robe", "light"],
+  chronomancer: ["robe", "light"],
+  stormcaller: ["robe", "light"],
+};
+const dclsOf = (it) => (it && it.wtype && WEAPON_TYPES[it.wtype] ? WEAPON_TYPES[it.wtype].dcls : null);
+const weaponsFor = (cls) => CLASS_WEAPONS[cls] || DCLS_KEYS;
+const armorsFor = (cls) => CLASS_ARMOR[cls] || ARMOR_KEYS;
+const usableWtypes = (cls) => Object.keys(WEAPON_TYPES).filter((k) => weaponsFor(cls).includes(WEAPON_TYPES[k].dcls));
+const isArmorSlot = (slot) => ARMOR_SLOTS.includes(slot);
+function canEquip(g, it) {
+  if (!it) return true;
+  const d = dclsOf(it);
+  if (d) return weaponsFor(g.cls).includes(d);
+  if (isArmorSlot(it.slot) && it.atype && ARMOR_TYPES[it.atype]) return armorsFor(g.cls).includes(it.atype);
+  return true;
+}
+function equipBlockReason(g, it) {
+  if (canEquip(g, it)) return null;
+  const cn = (CLASSES[g.cls] || {}).name || "You";
+  const d = dclsOf(it);
+  if (d) return `${cn}s are not trained in ${DAMAGE_CLASSES[d].name.toLowerCase()} weapons — they carry ${weaponsFor(g.cls).map((k) => DAMAGE_CLASSES[k].name.toLowerCase()).join(" and ")}.`;
+  return `${cn}s cannot wear ${ARMOR_TYPES[it.atype].name.toLowerCase()} armor — they move in ${armorsFor(g.cls).map((k) => ARMOR_TYPES[k].name.toLowerCase()).join(" or ")}.`;
+}
+/* the world tends to offer what a traveller can actually use */
+let LOOT_CLS = null;
 
 const MATS = [
   { key: "iron", name: "Iron Shard", color: "#9aa0ab", price: 30 },
@@ -284,19 +374,19 @@ const CLASSES = {
     name: "Ravager", seal: "怒", color: "#d14b2f",
     hp: 112, hpL: 21, atk: 13, atkL: 3.0, def: 3, defL: 0.55, crit: 7,
     blurb: "No patience. Only hunger.",
-    passive: "Passive: RAGE instead of cooldowns — striking builds it (+6), bleeding builds it faster (+8), kills feed it (+12). Skills cost rage and cast the instant it's paid.",
+    passive: "Passive: RAGE instead of cooldowns — striking builds it (+2), bleeding builds it faster (+3), kills feed it (+6). Skills cost rage and cast the instant it's paid.",
   },
   vowkeeper: {
     name: "Vowkeeper", seal: "誓", color: "#d8c9a0",
     hp: 135, hpL: 25, atk: 9, atkL: 2.2, def: 5, defL: 1.0, crit: 4,
     blurb: "Raises no hand — and needs none.",
-    passive: "Passive: the Vow — you never strike. Every blow you suffer erupts back as a shockwave to ALL foes (120% of the harm + 35% ATK). Aggression digs its own grave.",
+    passive: "Passive: the Vow — you never strike, and no weapon will do it for you. Every blow you suffer erupts back as a shockwave to ALL foes (130% of the harm + 50% ATK), measured on the blow as it ARRIVES: even a strike wholly swallowed by a shield or ward still rings out. Aggression digs its own grave.",
   },
   chronomancer: {
     name: "Chronomancer", seal: "时", color: "#8fb5c8",
     hp: 92, hpL: 17, atk: 12, atkL: 2.8, def: 3, defL: 0.6, crit: 9,
     blurb: "Borrows tomorrow, repays never.",
-    passive: "Passive: time flows kindly — cooldowns recover 50% faster, and every 4th tick you act twice.",
+    passive: "Passive: time flows kindly — cooldowns recover 35% faster, and every 4th tick you strike again (90%).",
   },
   stormcaller: {
     name: "Stormcaller", seal: "霹", color: "#7aa2d8",
@@ -370,7 +460,7 @@ const SKILLS = [
   { id: "thunder", cls: "taoist", name: "Thunder Talisman", lv: 25, cd: 14, tt: 240, desc: "450% attack and stuns the front foe briefly." },
   { id: "secondwind", cls: "warrior", name: "Second Wind", lv: 35, cd: 18, tt: 360, desc: "Below half HP: recover 20% max HP." },
   { id: "whirlwind", cls: "warrior", name: "Whirlwind", lv: 55, cd: 10, tt: 600, desc: "Strike every foe for 400% attack." },
-  { id: "titanwrath", cls: "warrior", name: "Titan's Wrath", lv: 75, cd: 25, tt: 900, desc: "Strike the front foe for 900% attack." },
+  { id: "titanwrath", cls: "warrior", name: "Titan's Wrath", lv: 75, cd: 20, tt: 900, desc: "Strike the front foe for 1000% attack." },
   { id: "chain", cls: "mage", name: "Chain Lightning", lv: 35, cd: 12, tt: 360, desc: "Strike every foe for 350% attack." },
   { id: "timewarp", cls: "mage", name: "Time Warp", lv: 55, cd: 20, tt: 600, desc: "Shaves 4s from every other skill's cooldown." },
   { id: "supernova", cls: "mage", name: "Supernova", lv: 75, cd: 26, tt: 900, desc: "Strike every foe for 1000% attack." },
@@ -379,9 +469,9 @@ const SKILLS = [
   { id: "breath", cls: "taoist", name: "Immortal Breath", lv: 75, cd: 24, tt: 900, desc: "Below 60% HP: recover 40% max HP." },
   { id: "twinfangs", cls: "blademaster", name: "Twin Fangs", lv: 3, cd: 6, tt: 45, desc: "Strike twice for 130% attack each." },
   { id: "parryflow", cls: "blademaster", name: "Parry Flow", lv: 8, cd: 14, tt: 90, desc: "Shield equal to 20% max HP." },
-  { id: "bleedingedge", cls: "blademaster", name: "Bleeding Edge", lv: 15, cd: 10, tt: 150, desc: "Open a wound: 100% attack per second for 3s." },
+  { id: "bleedingedge", cls: "blademaster", name: "Bleeding Edge", lv: 15, cd: 10, tt: 150, desc: "Open a wound: 110% attack per second for 4s." },
   { id: "heartseeker", cls: "blademaster", name: "Heartseeker", lv: 25, cd: 13, tt: 240, desc: "400% attack — always a critical." },
-  { id: "mirrorblades", cls: "blademaster", name: "Mirror Blades", lv: 35, cd: 12, tt: 360, desc: "Strike every foe for 300% attack." },
+  { id: "mirrorblades", cls: "blademaster", name: "Mirror Blades", lv: 35, cd: 12, tt: 360, desc: "Strike every foe for 345% attack." },
   { id: "deathspoem", cls: "blademaster", name: "Death's Poem", lv: 55, cd: 18, tt: 600, desc: "+40% attack and +15% crit for 6s." },
   { id: "finalcut", cls: "blademaster", name: "One Final Cut", lv: 75, cd: 26, tt: 900, desc: "Strike the front foe for 1200% attack." },
   { id: "wolfbite", cls: "beastcaller", name: "Wolf Bite", lv: 3, cd: 6, tt: 45, desc: "Your wolf tears the front foe for 240% attack." },
@@ -389,12 +479,12 @@ const SKILLS = [
   { id: "packhowl", cls: "beastcaller", name: "Pack Howl", lv: 15, cd: 16, tt: 150, desc: "+35% attack for 5s." },
   { id: "serpentvenom", cls: "beastcaller", name: "Serpent Venom", lv: 25, cd: 9, tt: 240, desc: "Venom burns the front foe: 90% attack per second, 4s." },
   { id: "stampede", cls: "beastcaller", name: "Stampede", lv: 35, cd: 14, tt: 360, desc: "Every beast charges: 320% attack to every foe." },
-  { id: "swarm", cls: "beastcaller", name: "Spirit Swarm", lv: 55, cd: 16, tt: 600, desc: "300% attack to every foe; chills them, −30% foe attack 5s." },
-  { id: "beastking", cls: "beastcaller", name: "King of Beasts", lv: 75, cd: 25, tt: 900, desc: "800% attack and stuns the front foe." },
+  { id: "swarm", cls: "beastcaller", name: "Spirit Swarm", lv: 55, cd: 16, tt: 600, desc: "350% attack to every foe; chills them, −30% foe attack 5s." },
+  { id: "beastking", cls: "beastcaller", name: "King of Beasts", lv: 75, cd: 25, tt: 900, desc: "950% attack and stuns the front foe." },
   { id: "palm", cls: "monk", name: "Palm Strike", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 260% attack." },
   { id: "ironbody", cls: "monk", name: "Iron Body", lv: 8, cd: 15, tt: 90, desc: "Shield equal to 25% max HP." },
-  { id: "fists3", cls: "monk", name: "Hundred Fists", lv: 15, cd: 9, tt: 150, desc: "Strike three times for 100% each." },
-  { id: "pressure", cls: "monk", name: "Pressure Point", lv: 25, cd: 14, tt: 240, desc: "350% attack and stuns the front foe." },
+  { id: "fists3", cls: "monk", name: "Hundred Fists", lv: 15, cd: 9, tt: 150, desc: "Strike three times for 115% each." },
+  { id: "pressure", cls: "monk", name: "Pressure Point", lv: 25, cd: 11, tt: 240, desc: "350% attack and stuns the front foe." },
   { id: "cyclone", cls: "monk", name: "Cyclone Kick", lv: 35, cd: 13, tt: 360, desc: "Strike every foe for 330% attack." },
   { id: "innerfire", cls: "monk", name: "Inner Fire", lv: 55, cd: 18, tt: 600, desc: "+30% attack for 6s and restore 15% max HP." },
   { id: "ancestorfist", cls: "monk", name: "Fist of the Ancestors", lv: 75, cd: 25, tt: 900, desc: "Strike the front foe for 1000% attack." },
@@ -408,29 +498,29 @@ const SKILLS = [
   { id: "shieldbash", cls: "sentinel", name: "Shield Bash", lv: 3, cd: 8, tt: 45, desc: "220% attack and stuns the front foe." },
   { id: "bulwark2", cls: "sentinel", name: "Bulwark", lv: 8, cd: 14, tt: 90, desc: "Shield equal to 35% max HP." },
   { id: "challenge", cls: "sentinel", name: "Challenge", lv: 15, cd: 14, tt: 150, desc: "Roar: all foes −30% attack for 5s." },
-  { id: "retort", cls: "sentinel", name: "Retort", lv: 25, cd: 12, tt: 240, desc: "250% attack, +100% per foe beyond the first." },
+  { id: "retort", cls: "sentinel", name: "Retort", lv: 25, cd: 12, tt: 240, desc: "280% attack, +120% per foe beyond the first." },
   { id: "shieldwave", cls: "sentinel", name: "Shield Wave", lv: 35, cd: 14, tt: 360, desc: "280% to every foe and shield 12% max HP." },
   { id: "unbreakable", cls: "sentinel", name: "Unbreakable", lv: 55, cd: 20, tt: 600, desc: "Shield 50% max HP and restore 12%." },
-  { id: "aegisjudge", cls: "sentinel", name: "Aegis Judgment", lv: 75, cd: 25, tt: 900, desc: "900% attack; gain a shield of 30% of the damage dealt." },
+  { id: "aegisjudge", cls: "sentinel", name: "Aegis Judgment", lv: 75, cd: 22, tt: 900, desc: "900% attack; gain a shield of 30% of the damage dealt." },
   { id: "aimedshot", cls: "ranger", name: "Aimed Shot", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 280% attack." },
   { id: "camostep", cls: "ranger", name: "Camouflage", lv: 8, cd: 14, tt: 90, desc: "Chill all foes −30% attack 4s and shield 12% max HP." },
   { id: "serpentarrow", cls: "ranger", name: "Serpent Arrow", lv: 15, cd: 9, tt: 150, desc: "Poison the front foe: 100% attack per second, 4s." },
-  { id: "pinningshot", cls: "ranger", name: "Pinning Shot", lv: 25, cd: 12, tt: 240, desc: "320% attack and stuns the front foe." },
+  { id: "pinningshot", cls: "ranger", name: "Pinning Shot", lv: 25, cd: 10, tt: 240, desc: "320% attack and stuns the front foe." },
   { id: "arrowstorm", cls: "ranger", name: "Arrow Storm", lv: 35, cd: 13, tt: 360, desc: "Strike every foe for 310% attack." },
   { id: "hawkeye", cls: "ranger", name: "Hawkeye", lv: 55, cd: 18, tt: 600, desc: "+30% attack and +20% crit for 6s." },
   { id: "falconvolley", cls: "ranger", name: "Falcon Volley", lv: 75, cd: 26, tt: 900, desc: "Strike the front foe for 1150% attack." },
   { id: "recklessblow", cls: "berserker", name: "Reckless Blow", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 300% attack." },
   { id: "bloodpact", cls: "berserker", name: "Blood Pact", lv: 8, cd: 16, tt: 90, desc: "+40% attack for 6s." },
-  { id: "frenzy", cls: "berserker", name: "Frenzy", lv: 15, cd: 10, tt: 150, desc: "Strike three times for 110% each." },
-  { id: "rampage", cls: "berserker", name: "Rampage", lv: 25, cd: 13, tt: 240, desc: "Strike every foe for 300% attack." },
+  { id: "frenzy", cls: "berserker", name: "Frenzy", lv: 15, cd: 10, tt: 150, desc: "Strike three times for 125% each." },
+  { id: "rampage", cls: "berserker", name: "Rampage", lv: 25, cd: 13, tt: 240, desc: "Strike every foe for 340% attack." },
   { id: "warcry2", cls: "berserker", name: "War Cry", lv: 35, cd: 14, tt: 360, desc: "All foes −30% attack 5s; you gain +25% attack 5s." },
   { id: "laststand", cls: "berserker", name: "Last Stand", lv: 55, cd: 20, tt: 600, desc: "Restore 25% max HP and gain +35% attack 6s." },
   { id: "berserkrush", cls: "berserker", name: "Berserk Rush", lv: 75, cd: 25, tt: 900, desc: "Strike the front foe for 1250% attack." },
   { id: "shadowbolt", cls: "warlock", name: "Shadow Bolt", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 300% attack." },
   { id: "curse", cls: "warlock", name: "Curse of Weakness", lv: 8, cd: 12, tt: 90, desc: "All foes −30% attack for 5s." },
-  { id: "drainlife", cls: "warlock", name: "Drain Life", lv: 15, cd: 10, tt: 150, desc: "200% attack and restore 12% max HP." },
+  { id: "drainlife", cls: "warlock", name: "Drain Life", lv: 15, cd: 10, tt: 150, desc: "260% attack and restore 12% max HP." },
   { id: "hex", cls: "warlock", name: "Hex", lv: 25, cd: 9, tt: 240, desc: "Burn the front foe for 120% attack per second, 4s." },
-  { id: "shadowflame", cls: "warlock", name: "Shadowflame", lv: 35, cd: 13, tt: 360, desc: "Strike every foe for 320% attack." },
+  { id: "shadowflame", cls: "warlock", name: "Shadowflame", lv: 35, cd: 13, tt: 360, desc: "Strike every foe for 360% attack." },
   { id: "soulburn", cls: "warlock", name: "Soul Burn", lv: 55, cd: 18, tt: 600, desc: "+25% attack and +20% crit for 6s." },
   { id: "cataclysm", cls: "warlock", name: "Cataclysm", lv: 75, cd: 26, tt: 900, desc: "Strike every foe for 1000% attack." },
   { id: "smite", cls: "cleric", name: "Smite", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 250% attack." },
@@ -442,7 +532,7 @@ const SKILLS = [
   { id: "resurrection", cls: "cleric", name: "Radiant Grace", lv: 75, cd: 24, tt: 900, desc: "Restore 60% max HP and shield 30%." },
   { id: "quickdraw", cls: "samurai", name: "Quick Draw", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 270% attack." },
   { id: "parrystance", cls: "samurai", name: "Parry Stance", lv: 8, cd: 13, tt: 90, desc: "Shield 22% max HP." },
-  { id: "crosscut", cls: "samurai", name: "Cross Cut", lv: 15, cd: 9, tt: 150, desc: "Strike twice for 150% each." },
+  { id: "crosscut", cls: "samurai", name: "Cross Cut", lv: 15, cd: 9, tt: 150, desc: "Strike twice for 170% each." },
   { id: "focusstrike", cls: "samurai", name: "Focused Strike", lv: 25, cd: 13, tt: 240, desc: "420% attack — always critical." },
   { id: "windcut", cls: "samurai", name: "Wind Cutter", lv: 35, cd: 13, tt: 360, desc: "Strike every foe for 320% attack." },
   { id: "bushido", cls: "samurai", name: "Bushido", lv: 55, cd: 18, tt: 600, desc: "+35% attack and +15% crit for 6s." },
@@ -452,18 +542,18 @@ const SKILLS = [
   { id: "regrowth", cls: "druid", name: "Regrowth", lv: 15, cd: 12, tt: 150, desc: "Restore 22% max HP over the moment." },
   { id: "thornburst", cls: "druid", name: "Thorn Burst", lv: 25, cd: 12, tt: 240, desc: "Strike every foe for 280% attack." },
   { id: "wildshape", cls: "druid", name: "Wild Shape", lv: 35, cd: 16, tt: 360, desc: "+30% attack for 6s and restore 12%." },
-  { id: "hurricane", cls: "druid", name: "Hurricane", lv: 55, cd: 16, tt: 600, desc: "Strike every foe for 300%; chill them 5s." },
+  { id: "hurricane", cls: "druid", name: "Hurricane", lv: 55, cd: 16, tt: 600, desc: "Strike every foe for 360%; chill them 5s." },
   { id: "avatar", cls: "druid", name: "Avatar of the Wild", lv: 75, cd: 25, tt: 900, desc: "Strike every foe for 950% attack." },
   { id: "boneshard", cls: "necromancer", name: "Bone Shard", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 260% attack." },
   { id: "graspdead", cls: "necromancer", name: "Grasp of the Dead", lv: 8, cd: 12, tt: 90, desc: "All foes −30% attack for 5s." },
   { id: "plaguetouch", cls: "necromancer", name: "Plague Touch", lv: 15, cd: 9, tt: 150, desc: "Infect the front foe: 110% attack per second, 4s." },
-  { id: "soulrend", cls: "necromancer", name: "Soul Rend", lv: 25, cd: 10, tt: 240, desc: "300% attack and restore 10% max HP." },
-  { id: "bonestorm", cls: "necromancer", name: "Bone Storm", lv: 35, cd: 13, tt: 360, desc: "Strike every foe for 300% attack." },
+  { id: "soulrend", cls: "necromancer", name: "Soul Rend", lv: 25, cd: 10, tt: 240, desc: "340% attack and restore 10% max HP." },
+  { id: "bonestorm", cls: "necromancer", name: "Bone Storm", lv: 35, cd: 13, tt: 360, desc: "Strike every foe for 350% attack." },
   { id: "deathpact", cls: "necromancer", name: "Death Pact", lv: 55, cd: 18, tt: 600, desc: "+25% attack and +20% crit for 6s." },
   { id: "apocalypse", cls: "necromancer", name: "Apocalypse", lv: 75, cd: 26, tt: 900, desc: "Strike every foe for 1000% attack." },
   { id: "runeblade", cls: "spellblade", name: "Runeblade", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 280% attack." },
   { id: "manaward", cls: "spellblade", name: "Mana Ward", lv: 8, cd: 13, tt: 90, desc: "Shield 25% max HP." },
-  { id: "flamestrike", cls: "spellblade", name: "Flame Strike", lv: 15, cd: 9, tt: 150, desc: "Burn the front foe for 110% attack per second, 3s." },
+  { id: "flamestrike", cls: "spellblade", name: "Flame Strike", lv: 15, cd: 9, tt: 150, desc: "Burn the front foe for 110% attack per second, 4s." },
   { id: "spellcleave", cls: "spellblade", name: "Spell Cleave", lv: 25, cd: 12, tt: 240, desc: "Strike every foe for 300% attack." },
   { id: "arcanesurge", cls: "spellblade", name: "Arcane Surge", lv: 35, cd: 14, tt: 360, desc: "+30% attack and +15% crit for 6s." },
   { id: "blinkstrike", cls: "spellblade", name: "Blink Strike", lv: 55, cd: 12, tt: 600, desc: "450% attack — always critical." },
@@ -494,7 +584,7 @@ const SKILLS = [
   { id: "arcflash", cls: "stormcaller", name: "Arc Flash", lv: 15, cd: 10, tt: 150, desc: "STORM — 280% to every foe.", el: "storm" },
   { id: "ioncharge", cls: "stormcaller", name: "Ion Charge", lv: 25, cd: 15, tt: 240, desc: "+20% crit for 6s." },
   { id: "stormlance", cls: "stormcaller", name: "Storm Lance", lv: 35, cd: 12, tt: 360, desc: "STORM — 520% to the front foe.", el: "storm" },
-  { id: "tempest", cls: "stormcaller", name: "Tempest", lv: 55, cd: 16, tt: 600, desc: "STORM — 330% to every foe and chills them 4s.", el: "storm" },
+  { id: "tempest", cls: "stormcaller", name: "Tempest", lv: 55, cd: 16, tt: 600, desc: "STORM — 380% to every foe and chills them 4s.", el: "storm" },
   { id: "skyfall", cls: "stormcaller", name: "Skyfall", lv: 75, cd: 24, tt: 900, desc: "STORM — 950% to every foe.", el: "storm" },
 ];
 
@@ -691,7 +781,12 @@ function makeItem(tier, opts = {}) {
   const slotKey = opts.slot || pick(SLOT_KEYS);
   const s = tierScale(tier) * r.mult * (opts.boost || 1);
   const v = () => rnd(0.9, 1.1);
-  const wtype = slotKey === "weapon" ? (opts.wtype || pick(Object.keys(WEAPON_TYPES))) : undefined;
+  const wtype = slotKey === "weapon"
+    ? (opts.wtype || pick(LOOT_CLS && Math.random() < 0.82 ? usableWtypes(LOOT_CLS) : Object.keys(WEAPON_TYPES)))
+    : undefined;
+  const atype = isArmorSlot(slotKey)
+    ? (opts.atype || pick(LOOT_CLS && Math.random() < 0.82 ? armorsFor(LOOT_CLS) : ARMOR_KEYS))
+    : undefined;
   const rolled = rollStats(slotKey, tier, s, rIdx, opts.favor, opts.wild);
   const stats = rolled.stats;
   const bonus = BONUS_STATS[rIdx] || 0;
@@ -701,6 +796,15 @@ function makeItem(tier, opts = {}) {
     if (k === "hp") stats.hp = (stats.hp || 0) + Math.round(12 * s * v());
     if (k === "def") stats.def = (stats.def || 0) + Math.round(1.2 * s * v());
     if (k === "crit") stats.crit = +((stats.crit || 0) + 1 + 0.6 * rIdx).toFixed(1);
+  }
+  /* weight decides the SHAPE of an armor's virtues: plate hoards shelter,
+     cloth spends it on power. Totals stay comparable — the trade is real. */
+  if (atype && ARMOR_TYPES[atype]) {
+    const am = ARMOR_TYPES[atype];
+    if (stats.hp) stats.hp = Math.max(1, Math.round(stats.hp * am.hp));
+    if (stats.def) stats.def = Math.max(1, Math.round(stats.def * am.def));
+    if (stats.atk) stats.atk = Math.max(1, Math.round(stats.atk * am.atk));
+    if (stats.crit) stats.crit = +(stats.crit * am.crit).toFixed(1);
   }
   const procs = rollDropEnchants(slotKey, rIdx, opts.proc);
   /* elemental affixes — wards on any gear from Rare-adjacent up; weapons from
@@ -723,7 +827,7 @@ function makeItem(tier, opts = {}) {
     set: opts.set,
     heat: rolled.heat,
     procs,
-    wtype,
+    wtype, atype,
     name: opts.name || `${RARITY_ADJ[rIdx]} ${pick(wtype ? WEAPON_TYPES[wtype].nouns : SLOTS[slotKey].nouns)}`,
     stats,
     value: Math.round(10 * tierScale(tier) * r.mult),
@@ -736,7 +840,8 @@ function itemStatText(it) {
   if (it.stats.hp) p.push(`+${fmt(it.stats.hp)} HP`);
   if (it.stats.def) p.push(`+${fmt(it.stats.def)} DEF`);
   if (it.stats.crit) p.push(`+${it.stats.crit}% CRIT`);
-  if (it.wtype && WEAPON_TYPES[it.wtype]) p.push(`${WEAPON_TYPES[it.wtype].hands}H·${WEAPON_TYPES[it.wtype].spd}spd`);
+  if (it.wtype && WEAPON_TYPES[it.wtype]) p.push(`${DAMAGE_CLASSES[WEAPON_TYPES[it.wtype].dcls].glyph}${DAMAGE_CLASSES[WEAPON_TYPES[it.wtype].dcls].name} · ${WEAPON_TYPES[it.wtype].hands}H·${WEAPON_TYPES[it.wtype].spd}spd`);
+  if (it.atype && ARMOR_TYPES[it.atype]) p.push(`${ARMOR_TYPES[it.atype].glyph}${ARMOR_TYPES[it.atype].name}`);
   if (it.res && ELEMENTS[it.res.el]) p.push(`${ELEMENTS[it.res.el].glyph}res${Math.round(it.res.pct * 100)}%`);
   if (it.infuse) p.push(it.infuse.el === "chaos" ? `混infuse${Math.round(it.infuse.pct * 100)}%` : `${ELEMENTS[it.infuse.el].glyph}infuse${Math.round(it.infuse.pct * 100)}%`);
   for (const pid2 of itemProcs(it)) if (PROCS[pid2]) p.push(`✦${PROCS[pid2].name}`);
@@ -1356,6 +1461,27 @@ function applyDrop(g, item, quiet = false) {
     if (!quiet) pushLog(g, `Melted ${item.name} — no hand free for it (two-handed grip) +${fmt(item.value)}g${e}.`, "melt");
     return "melt";
   }
+  if (!canEquip(g, item)) {
+    if (vClass) {
+      if (dupCopy) {
+        g.gold += item.value;
+        const e = distill(item);
+        if (!quiet) pushLog(g, `Duplicate attunement — melted ${item.name} +${fmt(item.value)}g${e}.`, "melt");
+        return "melt";
+      }
+      if (!quiet) pushLog(g, `${item.name} rests in the vault — your school never trained for it.`, "loot");
+      return "vaulted";
+    }
+    if (g.inv.length >= INV_CAP) {
+      g.gold += item.value;
+      const e = distill(item);
+      if (!quiet) pushLog(g, `Pack full — melted ${item.name} (untrained) +${fmt(item.value)}g${e}.`, "melt");
+      return "melt";
+    }
+    g.inv = [...g.inv, item];
+    if (!quiet) pushLog(g, `${item.name} waits in your pack — your school never trained for it.`, "loot");
+    return "kept";
+  }
   let cur = g.eq[item.slot];
   if (!cur) {
     if (item.slot === "weapon" && isTwoH(item)) displaceOffhand(g, quiet);
@@ -1495,7 +1621,7 @@ function rewardFoe(g, f, st) {
     for (const ck of Object.keys(g.cds)) g.cds[ck] = Math.max(0, g.cds[ck] - 0.5);
   }
   if (g.cls === "necromancer") g.graveChill = 3;
-  if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 12);
+  if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 6);
   const kprocs = eqProcs(g);
   if (kprocs.has("lifedrink")) g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.06));
   if (kprocs.has("hastewind") && Math.random() < 0.15) {
@@ -1653,6 +1779,7 @@ const TACT = {
 function step(prev) {
   if (prev.paused) return prev;
   RARITY_LUCK = prev.bg === "gambler" ? 0.25 : 0;
+  LOOT_CLS = prev.cls;
   const g = {
     ...prev,
     buffs: { ...prev.buffs }, cds: { ...prev.cds },
@@ -1733,7 +1860,7 @@ function step(prev) {
   }
 
   // timers
-  for (const k of Object.keys(g.cds)) g.cds[k] = Math.max(0, g.cds[k] - dt * (g.cls === "chronomancer" ? 1.5 : 1));
+  for (const k of Object.keys(g.cds)) g.cds[k] = Math.max(0, g.cds[k] - dt * (g.cls === "chronomancer" ? 1.35 : 1));
   const b = g.buffs;
   if (b.atkT > 0) { b.atkT -= dt; if (b.atkT <= 0) b.atkMult = 1; }
   if (b.critT > 0) { b.critT -= dt; if (b.critT <= 0) b.critAdd = 0; }
@@ -1917,7 +2044,7 @@ function step(prev) {
         else cast = false;
         break;
       case "whirlwind": dealAllE(4, "Whirlwind"); break;
-      case "titanwrath": dealFrontE(9, "Titan's Wrath"); break;
+      case "titanwrath": dealFrontE(10, "Titan's Wrath"); break;
       case "chain": dealAllE(3.5, "Chain"); break;
       case "timewarp": {
         let hastened = false;
@@ -1937,7 +2064,7 @@ function step(prev) {
         break;
       case "twinfangs": dealFrontE(1.3, "Fang"); dealFrontE(1.3, "Fang"); break;
       case "parryflow": gainShield(st.maxHp * 0.2); pushLog(g, "You settle into the parry flow.", "buff"); break;
-      case "bleedingedge": b.dot = Math.round(st.atk * 1.0); b.dotT = 3; pushLog(g, "The wound weeps freely.", "buff"); break;
+      case "bleedingedge": b.dot = Math.round(st.atk * 1.1); b.dotT = 4; pushLog(g, "The wound weeps freely.", "buff"); break;
       case "heartseeker": {
         if (foes[0]) {
           const dmg = Math.max(1, Math.round(baseAtk * 4 * rnd(0.85, 1.15) * critDmg));
@@ -1946,7 +2073,7 @@ function step(prev) {
         }
         break;
       }
-      case "mirrorblades": dealAllE(3, "Mirrors"); break;
+      case "mirrorblades": dealAllE(3.45, "Mirrors"); break;
       case "deathspoem": b.atkMult = 1.4; b.atkT = 6; b.critAdd = 15; b.critT = 6; pushLog(g, "You recite Death's Poem.", "buff"); break;
       case "finalcut": dealFrontE(12, "Final Cut"); break;
       case "wolfbite": dealFrontE(2.4, "Wolf"); break;
@@ -1954,11 +2081,11 @@ function step(prev) {
       case "packhowl": b.atkMult = 1.35; b.atkT = 5; pushLog(g, "The pack answers your howl.", "buff"); break;
       case "serpentvenom": b.dot = Math.round(st.atk * 0.9); b.dotT = 4; pushLog(g, "Venom takes hold.", "buff"); break;
       case "stampede": dealAllE(3.2, "Stampede"); break;
-      case "swarm": dealAllE(3, "Swarm"); b.slowT = 5; break;
-      case "beastking": dealFrontE(8, "Beast King"); if (foes[0]) foes[0].stun = 2; break;
+      case "swarm": dealAllE(3.5, "Swarm"); b.slowT = 5; break;
+      case "beastking": dealFrontE(9.5, "Beast King"); if (foes[0]) foes[0].stun = 2; break;
       case "palm": dealFrontE(2.6, "Palm"); break;
       case "ironbody": gainShield(st.maxHp * 0.25); pushLog(g, "Iron Body settles like bedrock.", "buff"); break;
-      case "fists3": dealFrontE(1, "Fists"); dealFrontE(1, "Fists"); dealFrontE(1, "Fists"); break;
+      case "fists3": dealFrontE(1.15, "Fists"); dealFrontE(1.15, "Fists"); dealFrontE(1.15, "Fists"); break;
       case "pressure": dealFrontE(3.5, "Pressure"); if (foes[0]) foes[0].stun = 2; break;
       case "cyclone": dealAllE(3.3, "Cyclone"); break;
       case "innerfire":
@@ -1976,7 +2103,7 @@ function step(prev) {
       case "shieldbash": dealFrontE(2.2, "Bash"); if (foes[0]) foes[0].stun = 2; break;
       case "bulwark2": gainShield(st.maxHp * 0.35); pushLog(g, "Your bulwark rises.", "buff"); break;
       case "challenge": b.slowT = 5; pushLog(g, "Your challenge shakes their resolve.", "buff"); break;
-      case "retort": dealFrontE(2.5 + Math.max(0, foes.length - 1), "Retort"); break;
+      case "retort": dealFrontE(2.8 + 1.2 * Math.max(0, foes.length - 1), "Retort"); break;
       case "shieldwave": dealAllE(2.8, "Wave"); gainShield(st.maxHp * 0.12); break;
       case "unbreakable":
         gainShield(st.maxHp * 0.5);
@@ -1992,16 +2119,16 @@ function step(prev) {
       case "falconvolley": dealFrontE(11.5, "Falcon"); break;
       case "recklessblow": dealFrontE(3, "Reckless"); break;
       case "bloodpact": b.atkMult = 1.4; b.atkT = 6; pushLog(g, "Blood pact sworn.", "buff"); break;
-      case "frenzy": dealFrontE(1.1, "Frenzy"); dealFrontE(1.1, "Frenzy"); dealFrontE(1.1, "Frenzy"); break;
-      case "rampage": dealAllE(3, "Rampage"); break;
+      case "frenzy": dealFrontE(1.25, "Frenzy"); dealFrontE(1.25, "Frenzy"); dealFrontE(1.25, "Frenzy"); break;
+      case "rampage": dealAllE(3.4, "Rampage"); break;
       case "warcry2": b.slowT = 5; b.atkMult = 1.25; b.atkT = 5; pushLog(g, "Your war cry splits the air.", "buff"); break;
       case "laststand": heal(0.25); b.atkMult = 1.35; b.atkT = 6; pushLog(g, "Last stand — you will not fall here.", "buff"); break;
       case "berserkrush": dealFrontE(12.5, "Rush"); break;
       case "shadowbolt": dealFrontE(3, "Bolt"); break;
       case "curse": b.slowT = 5; pushLog(g, "A curse of weakness settles.", "buff"); break;
-      case "drainlife": dealFrontE(2, "Drain"); heal(0.12); break;
+      case "drainlife": dealFrontE(2.6, "Drain"); heal(0.12); break;
       case "hex": b.dot = Math.round(st.atk * 1.2); b.dotT = 4; pushLog(g, "The hex festers.", "buff"); break;
-      case "shadowflame": dealAllE(3.2, "Shadowflame"); break;
+      case "shadowflame": dealAllE(3.6, "Shadowflame"); break;
       case "soulburn": b.atkMult = 1.25; b.atkT = 6; b.critAdd = 20; b.critT = 6; pushLog(g, "Soul burns bright.", "buff"); break;
       case "cataclysm": dealAllE(10, "Cataclysm"); break;
       case "smite": dealFrontE(2.5, "Smite"); break;
@@ -2021,7 +2148,7 @@ function step(prev) {
       case "resurrection": heal(0.6); gainShield(st.maxHp * 0.3); pushLog(g, "Radiant grace floods your wounds.", "buff"); break;
       case "quickdraw": dealFrontE(2.7, "Quick"); break;
       case "parrystance": gainShield(st.maxHp * 0.22); pushLog(g, "You settle into the parry.", "buff"); break;
-      case "crosscut": dealFrontE(1.5, "Cross"); dealFrontE(1.5, "Cross"); break;
+      case "crosscut": dealFrontE(1.7, "Cross"); dealFrontE(1.7, "Cross"); break;
       case "focusstrike": {
         if (foes[0]) { const dmg = Math.max(1, Math.round(baseAtk * 4.2 * rnd(0.85, 1.15) * critDmg)); foes[0].hp -= dmg; fx.push({ id: floatSeq++, text: "Focus −" + fmt(dmg), crit: true, side: "enemy" }); }
         break;
@@ -2034,18 +2161,18 @@ function step(prev) {
       case "regrowth": heal(0.22); break;
       case "thornburst": dealAllE(2.8, "Thorns"); break;
       case "wildshape": b.atkMult = 1.3; b.atkT = 6; heal(0.12); pushLog(g, "You take the shape of the wild.", "buff"); break;
-      case "hurricane": dealAllE(3, "Hurricane"); b.slowT = 5; break;
+      case "hurricane": dealAllE(3.6, "Hurricane"); b.slowT = 5; break;
       case "avatar": dealAllE(9.5, "Avatar"); break;
       case "boneshard": dealFrontE(2.6, "Bone"); break;
       case "graspdead": b.slowT = 5; pushLog(g, "Dead hands claw at their feet.", "buff"); break;
       case "plaguetouch": b.dot = Math.round(st.atk * 1.1); b.dotT = 4; pushLog(g, "Plague takes root.", "buff"); break;
-      case "soulrend": dealFrontE(3, "Rend"); heal(0.1); break;
-      case "bonestorm": dealAllE(3, "Bonestorm"); break;
+      case "soulrend": dealFrontE(3.4, "Rend"); heal(0.1); break;
+      case "bonestorm": dealAllE(3.5, "Bonestorm"); break;
       case "deathpact": b.atkMult = 1.25; b.atkT = 6; b.critAdd = 20; b.critT = 6; pushLog(g, "You seal a pact with death.", "buff"); break;
       case "apocalypse": dealAllE(10, "Apocalypse"); break;
       case "runeblade": dealFrontE(2.8, "Rune"); break;
       case "manaward": gainShield(st.maxHp * 0.25); pushLog(g, "A mana ward flickers up.", "buff"); break;
-      case "flamestrike": b.dot = Math.round(st.atk * 1.1); b.dotT = 3; pushLog(g, "Runic flame clings on.", "buff"); break;
+      case "flamestrike": b.dot = Math.round(st.atk * 1.1); b.dotT = 4; pushLog(g, "Runic flame clings on.", "buff"); break;
       case "spellcleave": dealAllE(3, "Spellcleave"); break;
       case "arcanesurge": b.atkMult = 1.3; b.atkT = 6; b.critAdd = 15; b.critT = 6; pushLog(g, "Arcane power surges.", "buff"); break;
       case "blinkstrike": { if (foes[0]) { const dmg = Math.max(1, Math.round(baseAtk * 4.5 * rnd(0.85, 1.15) * critDmg)); foes[0].hp -= dmg; fx.push({ id: floatSeq++, text: "Blink −" + fmt(dmg), crit: true, side: "enemy" }); } break; }
@@ -2076,7 +2203,7 @@ function step(prev) {
       case "arcflash": dealAllE(2.8, "Arcflash"); break;
       case "ioncharge": b.critAdd = 20; b.critT = 6; pushLog(g, "Charge saturates the air.", "buff"); break;
       case "stormlance": dealFrontE(5.2, "Stormlance"); break;
-      case "tempest": dealAllE(3.3, "Tempest"); b.slowT = 4; break;
+      case "tempest": dealAllE(3.8, "Tempest"); b.slowT = 4; break;
       case "skyfall": dealAllE(9.5, "Skyfall"); break;
       case "aegisjudge": {
         if (foes[0]) {
@@ -2097,7 +2224,7 @@ function step(prev) {
   }
 
   g.hurtLastTick = false;
-  if (g.cls === "ravager" && foes.length) g.rage = Math.min(100, (g.rage || 0) + 6);
+  if (g.cls === "ravager" && foes.length) g.rage = Math.min(100, (g.rage || 0) + 2);
   if (g.cls === "ravager" && !foes.length) g.rage = Math.max(0, (g.rage || 0) - 2);
   if (g.cls === "chronomancer") g.chrono = ((g.chrono || 0) + 1) % 4;
   // Spellblade arcane edge: every 3rd strike detonates
@@ -2128,7 +2255,7 @@ function step(prev) {
     if (g.cls !== "vowkeeper") {
       dealFront(heroMul * mMul);
       if (spdEff > 1 && Math.random() < spdEff - 1) dealFront(0.8 * heroMul * mMul);
-      if (g.cls === "chronomancer" && g.chrono === 0) dealFront(1 * heroMul * mMul, "Echo");
+      if (g.cls === "chronomancer" && g.chrono === 0) dealFront(0.9 * heroMul * mMul, "Echo");
     }
     if (g.cls === "blademaster") {
       const off = g.eq.offhand;
@@ -2148,9 +2275,10 @@ function step(prev) {
   if (g.race === "seafolk" && !g.hurtLastTick && g.hp < st.maxHp) g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.01));
   if (b.dotT > 0 && foes[0]) { foes[0].hp -= Math.round(b.dot * dt * (g.cls === "shadow" ? 1.3 : 1) * (g.race === "emberkin" ? 1.25 : 1) * foeElemMod(b.dotEl || null, foes[0])); b.dotT -= dt; }
 
-  /* ---- item procs: on-hit ---- */
+  /* ---- item procs: on-hit (a Vowkeeper never strikes, so none of these
+     fire for them — their gear speaks through the Vow instead) ---- */
   const procs = eqProcs(g);
-  if (foes.length) {
+  if (foes.length && g.cls !== "vowkeeper") {
     if (procs.has("scorch") && b.dotT <= 0 && Math.random() < 0.12) {
       b.dot = Math.round(st.atk * 0.6); b.dotT = 3; b.dotEl = "fire";
       fx.push({ id: floatSeq++, text: "Scorch", crit: false, side: "enemy" });
@@ -2218,10 +2346,22 @@ function step(prev) {
 
   /* ---- enemy turn: every living foe strikes ---- */
   const heroDefEff = petCfg ? petCfg.heroDefMul : 1;
+  /* The Vow answers the BLOW, not the wound. Retaliation is measured on the
+     strike as it arrives — after armor and elemental resistance, but BEFORE
+     any shield or ward swallows it — so a hit absorbed to nothing still rings
+     out. Aggression is punished for being offered, not for landing. */
+  const vowRetaliate = (incoming) => {
+    if (g.cls !== "vowkeeper" || !(incoming > 0)) return;
+    const mul = b.vowT > 0 ? 1.6 : 1;
+    const shock = Math.max(1, Math.round((incoming * 1.3 + st.atk * 0.5) * mul));
+    let hits = 0;
+    for (const f2 of foes) if (f2.hp > 0) { f2.hp -= shock; hits++; }
+    if (hits) fx.push({ id: floatSeq++, text: "誓 −" + fmt(shock * hits), crit: b.vowT > 0, side: "enemy" });
+  };
   if (g.splash || g.lvlfx) { g.enemies = foes; return g; }
   for (let i = 0; i < foes.length; i++) {
     const f = foes[i];
-    if (f.stun > 0) { f.stun -= 1; continue; }
+    if (f.stun > 0) { f.stun -= f.isBoss ? 2 : 1; continue; }
     const petFront = petCfg && g.pet && g.pet.hp > 0 && g.formation !== "back";
     if (f.isBoss) {
       f.bsT = (f.bsT || 6) - dt;
@@ -2236,6 +2376,7 @@ function step(prev) {
             fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息 −" + fmt(bd2), crit: true, side: "beast" });
             if (g.pet.hp <= 0) { g.pet.hp = 0; g.pet.downT = 10; pushRibbon(g, petCfg.kind === "guardian" ? "THE GUARDIAN FALLS" : "YOUR BEAST FALLS", C.cinnabar); pushLog(g, "Your companion is struck down — it will return, in time.", "boss"); }
           } else {
+            vowRetaliate(bd2);
             if (b.shield > 0) { const ab = Math.min(b.shield, bd2); b.shield -= ab; bd2 -= ab; }
             if (bd2 > 0) { g.hp -= bd2; g.hurtLastTick = true; }
             fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息 −" + fmt(Math.max(0, bd2)), crit: true, side: "player" });
@@ -2264,22 +2405,18 @@ function step(prev) {
       continue;
     }
     let edmg = Math.max(1, Math.round((f.atk * slowed * rnd(0.85, 1.15) - st.def * heroDefEff * 0.6) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.88 : 1)));
+    if (f.el) edmg = Math.max(1, Math.round(edmg * (1 - playerRes(g, f.el))));
+    vowRetaliate(edmg);
     if (b.shield > 0) {
       const absorbed = Math.min(b.shield, edmg);
       b.shield -= absorbed;
       edmg -= absorbed;
+      if (edmg <= 0) fx.push({ id: floatSeq++, text: "⛨ warded", crit: false, side: "player" });
     }
-    if (edmg > 0 && f.el) edmg = Math.max(1, Math.round(edmg * (1 - playerRes(g, f.el))));
     if (edmg > 0) {
       g.hp -= edmg;
       g.hurtLastTick = true;
-      if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 8);
-      if (g.cls === "vowkeeper") {
-        const mul = (b.vowT > 0 ? 1.6 : 1);
-        const shock = Math.max(1, Math.round((edmg * 1.2 + st.atk * 0.35) * mul));
-        for (const f2 of foes) if (f2.hp > 0) f2.hp -= shock;
-        fx.push({ id: floatSeq++, text: "誓 −" + fmt(shock * Math.max(1, foes.length)), crit: b.vowT > 0, side: "enemy" });
-      }
+      if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 3);
       fx.push({ id: floatSeq++, text: (f.el ? ELEMENTS[f.el].glyph : "") + "−" + fmt(edmg), crit: false, side: "player" });
       if (procs.has("stoneveil") && Math.random() < 0.1) {
         gainShield(st.maxHp * 0.12);
@@ -2329,6 +2466,7 @@ function step(prev) {
 
 function applyOffline(g) {
   RARITY_LUCK = g.bg === "gambler" ? 0.25 : 0;
+  LOOT_CLS = g.cls;
   const now = Date.now();
   const sec = clamp((now - (g.savedAt || now)) / 1000, 0, 8 * 3600);
   if (sec < 90) return { g, report: null };
@@ -2437,11 +2575,23 @@ function migrate(raw) {
   };
   for (const k of SLOT_KEYS) if (g.eq[k]) g.eq[k] = backfillSet(g.eq[k]);
   g.inv = (g.inv || []).map(backfillSet);
+  /* saves older than v4 predate weapon damage classes and armor weights. Their
+     gear is grandfathered into shapes this school can actually carry — stats
+     untouched — so no one loses a build to a new rule. */
+  const legacyGear = (raw.v || 0) < SAVE_VER;
   const normItem = (it) => {
     if (!it) return it;
     let x = it;
     if (x.proc && !x.procs && PROCS[x.proc]) x = { ...x, procs: { [PROCS[x.proc].cat]: x.proc } };
     if (x.slot === "weapon" && !x.wtype) x = { ...x, wtype: "sword" };
+    if (x.wtype && WEAPON_TYPES[x.wtype] && legacyGear && !weaponsFor(cls).includes(WEAPON_TYPES[x.wtype].dcls)) {
+      const opts = usableWtypes(cls);
+      const pref = (CLASS_MASTERY[cls] || []).find((w) => opts.includes(w));
+      if (pref || opts.length) x = { ...x, wtype: pref || opts[0] };
+    }
+    if (isArmorSlot(x.slot) && !ARMOR_TYPES[x.atype]) {
+      x = { ...x, atype: legacyGear ? armorsFor(cls)[0] : pick(ARMOR_KEYS) };
+    }
     return x;
   };
   for (const k of SLOT_KEYS) if (g.eq[k]) g.eq[k] = normItem(g.eq[k]);
@@ -2788,6 +2938,8 @@ function App() {
 
   const equip = (item) =>
     mutate((g) => {
+      const blocked = equipBlockReason(g, item);
+      if (blocked) { pushLog(g, blocked, "sys"); return g; }
       if (item.slot === "offhand" && isTwoH(g.eq.weapon)) {
         pushLog(g, "Your two-handed grip leaves no hand free.", "sys");
         return g;
@@ -2808,6 +2960,8 @@ function App() {
   const equipOff = (item) =>
     mutate((g) => {
       if (g.cls !== "blademaster" || !item.wtype || isTwoH(item)) return g;
+      const blockedOff = equipBlockReason(g, item);
+      if (blockedOff) { pushLog(g, blockedOff, "sys"); return g; }
       if (isTwoH(g.eq.weapon)) { pushLog(g, "Free your main hand of the two-hander first.", "sys"); return g; }
       g.inv = g.inv.filter((i) => i.id !== item.id);
       const off = g.eq.offhand;
@@ -2916,6 +3070,8 @@ function App() {
       if (!accept) { pushLog(g, `Kept your current ${SLOTS[q.slot].name}. ${q.itemName} waits in your pack.`, "sys"); return g; }
       const incoming = g.inv.find((i) => i.id === itemId) || (g.vault || []).find((i) => i.id === itemId);
       if (!incoming) return g;
+      const blockedU = equipBlockReason(g, incoming);
+      if (blockedU) { pushLog(g, blockedU, "sys"); return g; }
       const old = g.eq[q.slot];
       g.inv = g.inv.filter((i) => i.id !== itemId);
       if (q.slot === "weapon" && isTwoH(incoming)) displaceOffhand(g, false);
@@ -3189,6 +3345,8 @@ function App() {
       if (!g.camping) { pushLog(g, "The vault opens only at camp.", "sys"); return g; }
       const v = (g.vault || []).find((x) => x.id === vid);
       if (!v) return g;
+      const blockedV = equipBlockReason(g, v);
+      if (blockedV) { pushLog(g, blockedV, "sys"); return g; }
       if (v.slot === "offhand" && isTwoH(g.eq.weapon)) {
         pushLog(g, "Your two-handed grip leaves no hand free.", "sys");
         return g;
@@ -3871,6 +4029,10 @@ function App() {
                 </div>
               ))}
               <div className="tiny dim" style={{ marginTop: 4 }}>Speed above 1.0 is the chance of an extra basic strike each tick; two-handers trade speed for heavier blows and seal the offhand while gripped. Each class masters certain types for +10% weapon damage — Warrior: sword/greatsword/glaive · Blademaster: sword/saber/dagger (and may wield a second one-hander, striking with both) · Mage: staff/whisk · Taoist: fists/whisk/staff · Beastcaller: saber/glaive/dagger · Monk: fists/staff/whisk · Shadow: dagger/saber · Sentinel: sword/glaive · Ranger: dagger/saber · Berserker: greatsword/glaive/saber · Warlock, Cleric, Necromancer: staff/whisk · Samurai: sword/saber · Druid: staff/fist · Spellblade: sword/saber/staff. Fist weapons are hand-to-hand: two-handed yet fastest of all.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>Steel, cloth and plate — what your school carries</div>
+              <div className="tiny dim">Every weapon wounds in one of three ways — <b style={{ color: DAMAGE_CLASSES.slash.color }}>刃 Slash</b> (sword, saber, greatsword), <b style={{ color: DAMAGE_CLASSES.pierce.color }}>刺 Pierce</b> (dagger, glaive), <b style={{ color: DAMAGE_CLASSES.blunt.color }}>捶 Blunt</b> (staff, whisk, fists) — and every school trains in some and refuses others. A Cleric keeps to staff and whisk and will not carry an edge; a Samurai answers only with the cut; a Ravager takes whatever is nearest. Training is permission; mastery (the green tag) is excellence atop it.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Worn armor has a WEIGHT, and weight decides the shape of its virtues: <b style={{ color: ARMOR_TYPES.robe.color }}>袍 Robe</b> spends shelter for power (−DEF −HP, +ATK +CRIT) · <b style={{ color: ARMOR_TYPES.light.color }}>轻 Light</b> stays swift and keen · <b style={{ color: ARMOR_TYPES.medium.color }}>中 Medium</b> balances · <b style={{ color: ARMOR_TYPES.heavy.color }}>重 Heavy</b> hoards shelter at the cost of edge. Totals stay close across the four — the trade is real, not a ladder. Weight applies to armor, helm, pauldrons, greaves, bracers, gloves and boots; trinkets, cloaks, belts and offhands are unweighted and open to all.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Gear you were never trained for is tagged <b style={{ color: "#a86a6a" }}>untrained</b>: it will never be worn or auto-equipped, and waits in your pack or vault (sell it, or keep it for another life). The world knows this — most of what drops suits your school, but not all of it. Your training is listed on your stat sheet.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The long road — pacing &amp; the late game</div>
               <div className="tiny dim">The middle realms (5–55) climb steeply on purpose — that's where builds are forged, so each realm is lived in rather than blurred past. Beyond 55 the slope eases and MARQUEE kills carry you: Elites are worth +35% XP, bosses +50%. The world sharpens too: past 55, lesser foes may bear a war-omen — <b style={{ color: C.cinnabar }}>Frenzied</b> (harder, +25% XP) · <b style={{ color: C.storm }}>Bulwarked</b> (tougher, +40% gold) · <b style={{ color: C.violet }}>Voidtouched</b> (element-warded, +20% XP) · <b style={{ color: C.gilt }}>Gilded</b> (frail, gold ×2) · <b>Hollowed</b> (leaks 2精). Every boss rematch raises its HUNT RANK (to 10): it returns +10% stronger each rank but pays +5% XP, +3% relic chance, and better Eternal odds. And the Throne of Silence now ASCENDS — every 25 kills there, its foes gain +8% and its spoils +6%, forever. The end is a ladder, not a plateau.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>How skills choose their moment</div>
@@ -3957,7 +4119,7 @@ function App() {
                   </div>
                   {it ? (
                     <>
-                      <div className="itemname" style={{ color: RARITIES[it.rarity].color }}>{it.name}{it.temper ? ` +${it.temper}` : ""}{typeof it.set === "number" && <span className="settag">set</span>}{masteryOf(g, it) && <span className="settag" style={{ borderColor: C.jade, color: C.jade }}>mastery</span>}</div>
+                      <div className="itemname" style={{ color: RARITIES[it.rarity].color }}>{it.name}{it.temper ? ` +${it.temper}` : ""}{typeof it.set === "number" && <span className="settag">set</span>}{masteryOf(g, it) && <span className="settag" style={{ borderColor: C.jade, color: C.jade }}>mastery</span>}{!canEquip(g, it) && <span className="settag" style={{ borderColor: "#8a5050", color: "#a86a6a" }}>untrained</span>}</div>
                       <div className="mono tiny dim">{itemStatText(it)}</div>
                       {itemProcs(it).map((pid3) => PROCS[pid3] && (
                         <div key={pid3} className="tiny" style={{ color: PROCS[pid3].color }}>✦{PROCS[pid3].name}: {PROCS[pid3].desc}</div>
@@ -3989,7 +4151,8 @@ function App() {
               const frW = focusRanks(g);
               const fGain = cur && frW.length ? focusCmp(it, cur, frW) > 0 : false;
               const nLoss = cur ? frW.every((k) => (it.stats[k] || 0) >= (cur.stats[k] || 0)) : false;
-              const wouldUp = cur && ((fGain && bvI >= bvE * 0.85) || bvI > bvE * 1.03 || (nLoss && bvI > bvE * 1.005));
+              const untrained = !canEquip(g, it);
+              const wouldUp = !untrained && cur && ((fGain && bvI >= bvE * 0.85) || bvI > bvE * 1.03 || (nLoss && bvI > bvE * 1.005));
               const bondGain = typeof it.set === "number" &&
                 bondPoints(g, calcStats(g), statWeights(g), eqWith(g.eq, it.slot, it)) >
                 bondPoints(g, calcStats(g), statWeights(g), g.eq) + 0.5;
@@ -4001,6 +4164,7 @@ function App() {
                       {it.name} <span className="mono dim tiny">{SLOTS[it.slot].name} T{it.tier}</span>
                       {typeof it.set === "number" && <span className="settag">set</span>}
                       {bondGain && <span className="settag" style={{ borderColor: C.gilt, color: C.gilt }}>+bond</span>}
+                      {untrained && <span className="settag" style={{ borderColor: "#8a5050", color: "#a86a6a" }}>untrained</span>}
                       {masteryOf(g, it) && <span className="settag" style={{ borderColor: C.jade, color: C.jade }}>mastery</span>}
                       {wouldUp && <span className="upgtag">upgrade</span>}
                     </div>
@@ -4014,7 +4178,7 @@ function App() {
                     </div>
                   </div>
                   <div className="itemacts">
-                    <button className="btn tiny" onClick={() => equip(it)}>Equip</button>
+                    <button className="btn tiny" disabled={untrained} onClick={() => equip(it)}>Equip</button>
                     {g.cls === "blademaster" && it.slot === "weapon" && !isTwoH(it) && !isTwoH(g.eq.weapon) && (
                       <button className="btn tiny ghost" onClick={() => equipOff(it)}>Off</button>
                     )}
@@ -4297,7 +4461,7 @@ function App() {
                 </div>
                 <div className="vaultside">
                   <span className="mono tiny" style={{ color: imp > 0 ? C.jade : C.dim }}>{imp > 0 ? "+" : ""}{fmt(imp)}</span>
-                  <button className="btn tiny" disabled={!g.camping} onClick={() => equipFromVault(v.id)}>Equip</button>
+                  <button className="btn tiny" disabled={!g.camping || !canEquip(g, v)} onClick={() => equipFromVault(v.id)}>Equip</button>
                 </div>
               </div>
             ))}
@@ -4421,6 +4585,7 @@ function App() {
               <div>{cls.passive}</div>
               <div>Bloodline: {raceInfo.modText}</div>
               <div>Resist: {EL_KEYS.map((ek) => `${ELEMENTS[ek].glyph}${Math.round(playerRes(g, ek) * 100)}%`).join(" · ")}</div>
+              <div>Trained: {weaponsFor(g.cls).map((k) => DAMAGE_CLASSES[k].glyph + DAMAGE_CLASSES[k].name).join(" · ")} │ {armorsFor(g.cls).map((k) => ARMOR_TYPES[k].glyph + ARMOR_TYPES[k].name).join(" · ")}</div>
               {companionCfg(g) && (() => {
                 const cc = companionCfg(g);
                 const pc = petMaxOf(g, st);
