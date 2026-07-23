@@ -77,6 +77,26 @@ const STAT_CAPS = { crit: 100, def: 400, atk: null, hp: null };
    heals and shields meant nothing. Now reduction = def / (def + threshold),
    with the threshold climbing by level: armor keeps pace forever, matters
    more the more you invest, and never reaches invulnerability. */
+/* ---- up-level scaling ----
+   Striking far above your level is meant to be inefficient, never impossible.
+   penalty(d) = min(85, 1.5d + 0.85d²) as a share of your damage, capped so
+   even a wall can be chipped. One-directional: it never changes what you TAKE.
+   Rewards rise to +20% at a gap of 3 and then flatten, so the efficient band
+   is always +1 to +3 and no build can farm far above its weight. */
+const gapMult = (playerLv, foeLv) => {
+  const d = foeLv - playerLv;
+  if (d < 1) return 1;
+  return Math.max(0.15, 1 - 0.015 * d - 0.0085 * d * d);
+};
+const gapBand = (playerLv, foeLv) => {
+  const d = foeLv - playerLv;
+  return d >= 7 ? 2 : d >= 4 ? 1 : 0; // 0 challenge · 1 discouraged · 2 wall
+};
+const rewardMult = (playerLv, foeLv) => {
+  const d = foeLv - playerLv;
+  if (d >= 1) return 1 + Math.min(20, 7 * d) / 100;
+  return Math.max(0.4, 1 + 0.15 * d); // trivial prey pays less, floored at −60%
+};
 const DEF_CAP = 0.85;
 const defThreshold = (lvl) => 14 * Math.pow(1.05, lvl);
 const mitigation = (def, lvl, cap) => Math.min(cap || DEF_CAP, Math.max(0, def) / (Math.max(0, def) + defThreshold(lvl)));
@@ -868,6 +888,7 @@ function makeItem(tier, opts = {}) {
     if (stats.crit) stats.crit = +(stats.crit * am.crit).toFixed(1);
   }
   const procs = rollDropEnchants(slotKey, rIdx, opts.proc);
+  const pw = rollProcPws(procs, rIdx);
   /* elemental affixes — wards on any gear from Rare-adjacent up; weapons from
      Epic up may convert a share of every hit into an element (Eternals may
      roll CHAOS: a random element per trigger, at a fat 50% share). */
@@ -888,7 +909,7 @@ function makeItem(tier, opts = {}) {
     set: opts.set,
     heat: rolled.heat,
     procs,
-    wtype, atype,
+    wtype, atype, pw,
     name: opts.name || `${RARITY_ADJ[rIdx]} ${pick(wtype ? WEAPON_TYPES[wtype].nouns : SLOTS[slotKey].nouns)}`,
     stats,
     value: Math.round(10 * tierScale(tier) * r.mult),
@@ -985,7 +1006,7 @@ function calcStats(g) {
       app(soul.favor[1], 0.02 * n);
     }
   }
-  if (eqProcs(g).has("ironblood")) maxHp *= 1.06;
+  if (eqProcs(g).has("ironblood")) maxHp *= 1 + procPower(g, "ironblood");
   crit = Math.min(crit, STAT_CAPS.crit);
   const em = 1 + (g.echoes || 0) * 0.005;
   maxHp *= em; atk *= em; def *= em;
@@ -1058,6 +1079,57 @@ const PROCS = {
   sagemind: { name: "Sagemind", cat: "passive", aoe: false, color: "#63e2c6", desc: "Always on: +8% XP from kills" },
   ironblood: { name: "Ironblood", cat: "passive", aoe: false, color: "#c8452c", desc: "Always on: +6% max HP" },
 };
+/* ---- roll brackets: rarity buys QUALITY ----
+   Each trait names its magnitude at T1 and T4; T2/T3 interpolate. Rarity gates
+   which band may roll, and Mythic+ sits in the top band — Eternal always max.
+   Together with the locked counts, both re-roll sinks (chasing count, chasing
+   range) close at the top: there is nothing left to burn essence on. */
+const PROC_PW = {
+  scorch: { t1: 0.3, t4: 0.85, unit: "×ATK/s" },
+  stormbrand: { t1: 0.8, t4: 2.1, unit: "×ATK" },
+  chainarc: { t1: 0.45, t4: 1.3, unit: "×ATK all" },
+  cindernova: { t1: 0.7, t4: 1.85, unit: "×ATK all" },
+  stoneveil: { t1: 0.06, t4: 0.18, unit: "% HP shield", pct: true },
+  thornmail: { t1: 0.2, t4: 0.6, unit: "×ATK back" },
+  frostbite: { t1: 0.18, t4: 0.4, unit: "% foe ATK", pct: true },
+  lifedrink: { t1: 0.03, t4: 0.09, unit: "% HP/kill", pct: true },
+  leechfang: { t1: 0.01, t4: 0.03, unit: "% HP/hit", pct: true },
+  hastewind: { t1: 0.5, t4: 1.6, unit: "s off cds" },
+  greedglint: { t1: 0.05, t4: 0.16, unit: "% gold", pct: true },
+  sagemind: { t1: 0.04, t4: 0.13, unit: "% XP", pct: true },
+  ironblood: { t1: 0.03, t4: 0.1, unit: "% max HP", pct: true },
+};
+const PW_BRACKET = [[1, 2], [1, 2], [1, 2], [2, 3], [3, 4], [3.5, 4], [4, 4]]; // Common → Eternal
+const pwAt = (id, tier) => { const r = PROC_PW[id]; return r ? r.t1 + (r.t4 - r.t1) * (Math.max(1, Math.min(4, tier)) - 1) / 3 : 1; };
+function rollProcPw(id, rarity) {
+  if (!PROC_PW[id]) return 1;
+  const [lo, hi] = PW_BRACKET[rarity] || [1, 2];
+  const t = lo >= hi ? hi : lo + Math.random() * (hi - lo);
+  return +pwAt(id, t).toFixed(4);
+}
+const pwTier = (id, v) => {
+  const r = PROC_PW[id];
+  if (!r || v == null) return 3;
+  return Math.max(1, Math.min(4, Math.round(1 + ((v - r.t1) / Math.max(1e-9, r.t4 - r.t1)) * 3)));
+};
+/* the strongest copy of a trait you actually wear (duplicates stay inert) */
+function procPower(g, id) {
+  let best = null;
+  for (const k of SLOT_KEYS) {
+    if (!slotUnlocked(g, k)) continue;
+    const it = g.eq[k];
+    if (!it || !it.pw) continue;
+    const m = itemProcsMap(it);
+    for (const cat in m) if (m[cat] === id && it.pw[cat] != null) best = best == null ? it.pw[cat] : Math.max(best, it.pw[cat]);
+  }
+  return best == null ? pwAt(id, 3) : best;
+}
+const pwText = (id, v) => {
+  const r = PROC_PW[id];
+  if (!r) return "";
+  return (r.pct ? Math.round(v * 100) : +v.toFixed(2)) + r.unit;
+};
+const shuffled = (a) => a.map((x) => [Math.random(), x]).sort((u, v) => u[0] - v[0]).map((x) => x[1]);
 const procsOfCat = (cat) => Object.keys(PROCS).filter((k) => PROCS[k].cat === cat);
 const itemProcsMap = (it) => {
   if (!it) return {};
@@ -1069,49 +1141,95 @@ const itemProcs = (it) => Object.values(itemProcsMap(it));
 /* progressive enchanting: rarity sets how many trait slots an item can EVER
    hold (0..4); equipment type sets which categories fill first, so gear reads
    logically — weapons lean offensive, armor defensive, trinkets utility. */
-const ENCHANT_CAP = [0, 1, 2, 3, 3, 4, 4]; // Common → Eternal
+/* ---- enchantment counts: quantity is LOCKED near the top ----
+   Rarity used to buy more trait slots all the way up, so the efficient play at
+   Mythic and beyond was to keep burning essence re-forging for COUNT. Now the
+   ladder stops: the hard ceiling is 3, Mythic and Eternal share the same floor
+   of 2 with a slim 12% third, and Eternal spends its rarity on QUALITY rather
+   than quantity. There is nothing left to re-roll for at the top. */
+const ENCHANT_CAP = [0, 1, 1, 2, 2, 3, 3]; // Common → Eternal (hard ceiling)
+const ENCHANT_DROP = [
+  { g: 0, p: 0 },     // Common — never
+  { g: 0, p: 0.15 },  // Uncommon — one, rarely
+  { g: 0, p: 0.4 },   // Rare — one, often
+  { g: 1, p: 0.2 },   // Epic — one certain, 20% for a second
+  { g: 1, p: 0.35 },  // Legendary — one certain, 35% for a second
+  { g: 2, p: 0.12 },  // Mythic — two certain, 12% for a third
+  { g: 2, p: 0.12 },  // Eternal — same count; its rarity buys quality instead
+];
 const minRarityForEnchantSlot = (i) => ENCHANT_CAP.findIndex((c) => c >= i + 1);
+
+/* ---- what each piece of gear is willing to carry ----
+   A blade takes edge-work and bloodletting; it will not hold a ward that
+   answers being struck. Plate takes wards and constitution. Boots and cloaks
+   take swiftness. Trinkets take fortune and lore. Every slot draws only from
+   its own pool, so an item's traits always read as things that belong on it. */
+const SLOT_ENCHANTS = {
+  weapon: ["scorch", "stormbrand", "chainarc", "cindernova", "leechfang", "hastewind"],
+  offhand: ["stoneveil", "thornmail", "frostbite", "stormbrand"],
+  armor: ["stoneveil", "thornmail", "frostbite"],
+  helm: ["sagemind", "hastewind", "stoneveil"],
+  pauldrons: ["stoneveil", "thornmail"],
+  greaves: ["stoneveil", "frostbite"],
+  bracers: ["thornmail", "stoneveil", "leechfang"],
+  gloves: ["scorch", "stormbrand", "leechfang", "thornmail"],
+  boots: ["hastewind", "frostbite", "sagemind"],
+  cloak: ["frostbite", "stoneveil", "sagemind"],
+  belt: ["lifedrink", "greedglint"],
+  amulet: ["sagemind", "greedglint", "lifedrink", "cindernova"],
+  ring: ["scorch", "chainarc", "greedglint", "leechfang"],
+  talisman: ["sagemind", "lifedrink", "stormbrand"],
+  earring: ["sagemind", "greedglint", "hastewind"],
+  anklet: ["hastewind", "lifedrink", "greedglint"],
+};
+/* the minor pool every slot will take, so no pool feels airless */
+const UNIVERSAL_ENCHANTS = ["ironblood"];
+const enchantPool = (slot) => [...(SLOT_ENCHANTS[slot] || []), ...UNIVERSAL_ENCHANTS];
+const poolOfCat = (slot, cat) => enchantPool(slot).filter((id) => PROCS[id] && PROCS[id].cat === cat);
 function slotCatPriority(slot) {
-  if (slot === "weapon") return ["offensive", "sustain", "passive", "defensive"];
-  if (slot === "offhand") return ["defensive", "offensive", "sustain", "passive"];
-  if (["armor", "helm", "pauldrons", "greaves", "bracers"].includes(slot)) return ["defensive", "passive", "sustain", "offensive"];
-  if (["boots", "cloak", "gloves"].includes(slot)) return ["sustain", "passive", "offensive", "defensive"];
-  return ["passive", "sustain", "offensive", "defensive"]; // amulet, ring, talisman, belt, earring, anklet
+  const order = slot === "weapon" ? ["offensive", "sustain", "passive", "defensive"]
+    : slot === "offhand" ? ["defensive", "offensive", "sustain", "passive"]
+    : ["armor", "helm", "pauldrons", "greaves", "bracers"].includes(slot) ? ["defensive", "passive", "sustain", "offensive"]
+    : ["boots", "cloak", "gloves"].includes(slot) ? ["sustain", "passive", "offensive", "defensive"]
+    : ["passive", "sustain", "offensive", "defensive"];
+  return order.filter((cat) => poolOfCat(slot, cat).length > 0); // only what this slot will hold
 }
 const enchantCatsForSlot = (slot, rarity) => slotCatPriority(slot).slice(0, ENCHANT_CAP[rarity] || 0);
 const enchantCatsFor = (it) => (it ? enchantCatsForSlot(it.slot, it.rarity) : []);
 
-/* fresh-drop trait roll: g guaranteed slots (highest priority first), each
-   remaining available slot filled with probability p. Scales with rarity so
-   higher tiers guarantee more and top tier guarantees every available type. */
-const ENCHANT_DROP = [
-  { g: 0, p: 0 },     // Common — never
-  { g: 0, p: 0.18 },  // Uncommon (cap 1)
-  { g: 0, p: 0.22 },  // Rare (cap 2)
-  { g: 0, p: 0.3 },   // Epic (cap 3) — nothing certain
-  { g: 1, p: 0.28 },  // Legendary (cap 3) — one certain
-  { g: 1, p: 0.4 },   // Mythic (cap 4) — one certain
-  { g: 4, p: 1 },     // Eternal (cap 4) — all guaranteed
-];
+/* fresh-drop trait roll: g certain traits, then each further available slot at
+   probability p — and every draw comes from the SLOT'S OWN POOL. */
 function rollDropEnchants(slot, rarity, forcedPid) {
   const cats = enchantCatsForSlot(slot, rarity);
   if (!cats.length) return undefined;
   const rule = ENCHANT_DROP[rarity] || { g: 0, p: 0 };
   const procs = {};
-  if (forcedPid && PROCS[forcedPid] && cats.includes(PROCS[forcedPid].cat)) procs[PROCS[forcedPid].cat] = forcedPid;
+  if (forcedPid && PROCS[forcedPid] && cats.includes(PROCS[forcedPid].cat) && enchantPool(slot).includes(forcedPid)) {
+    procs[PROCS[forcedPid].cat] = forcedPid;
+  }
   let filled = Object.keys(procs).length;
   for (const cat of cats) {
     if (procs[cat]) continue;
-    if (filled < rule.g || Math.random() < rule.p) { procs[cat] = pick(procsOfCat(cat)); filled++; }
+    const pool = poolOfCat(slot, cat);
+    if (!pool.length) continue;
+    if (filled < rule.g || Math.random() < rule.p) { procs[cat] = pick(pool); filled++; }
   }
   return Object.keys(procs).length ? procs : undefined;
+}
+function rollProcPws(procs, rarity) {
+  if (!procs) return undefined;
+  const pw = {};
+  for (const cat in procs) pw[cat] = rollProcPw(procs[cat], rarity);
+  return pw;
 }
 function ensureProc(it) {
   if (itemProcs(it).length) return it;
   const cats = enchantCatsFor(it);
   if (!cats.length) return it;
   const cat = cats[0];
-  it.procs = { [cat]: pick(procsOfCat(cat)) };
+  const pool = poolOfCat(it.slot, cat);
+  if (!pool.length) return it;
+  it.procs = { [cat]: pick(pool) };
   return it;
 }
 function eqProcs(g) {
@@ -1683,8 +1801,8 @@ function rewardFoe(g, f, st) {
   const marquee = f.lvl >= 55 ? (f.isBoss ? 1.5 : f.isElite ? 1.35 : 1) : 1;
   const ascMult = g.zone === ZONES.length - 1 ? 1 + 0.06 * (g.ascension || 0) : 1;
   const huntXp = f.isBoss ? 1 + 0.05 * ((g.huntRank && g.huntRank[g.zone]) || 0) : 1;
-  const xpGain = Math.round(eXp(f.lvl) * rm * (g.restedT > 0 ? (g.bg === "pilgrim" ? 1.35 : 1.25) : 1) * sc * (rmods.xp || 1) * echoMult * setRewardMult * (eqProcs(g).has("sagemind") ? 1.08 : 1) * (g.bg === "scholar" ? 1.1 : 1) * marquee * ascMult * huntXp * (f.mutXp || 1));
-  const goldGain = Math.round(eGold(f.lvl) * rm * streakBonus * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1.1 : 1) * (g.bg === "noble" ? 1.08 : 1) * (g.bg === "rod" ? 1.05 : 1) * (g.zone === ZONES.length - 1 ? 1 + 0.06 * (g.ascension || 0) : 1) * (f.mutGold || 1));
+  const xpGain = Math.round(eXp(f.lvl) * rm * (g.restedT > 0 ? (g.bg === "pilgrim" ? 1.35 : 1.25) : 1) * sc * (rmods.xp || 1) * echoMult * setRewardMult * (eqProcs(g).has("sagemind") ? 1 + procPower(g, "sagemind") : 1) * (g.bg === "scholar" ? 1.1 : 1) * marquee * ascMult * huntXp * (f.mutXp || 1) * rewardMult(g.level, f.lvl));
+  const goldGain = Math.round(eGold(f.lvl) * rm * streakBonus * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1 + procPower(g, "greedglint") : 1) * (g.bg === "noble" ? 1.08 : 1) * (g.bg === "rod" ? 1.05 : 1) * (g.zone === ZONES.length - 1 ? 1 + 0.06 * (g.ascension || 0) : 1) * (f.mutGold || 1) * rewardMult(g.level, f.lvl));
   g.xp += xpGain; g.gold += goldGain; g.lifetimeKills += 1;
   bumpBounty(g, "kills");
   g.vigor = Math.max(0, g.vigor - 0.35 * (g.bg === "farmhand" ? 0.75 : 1));
@@ -1699,9 +1817,10 @@ function rewardFoe(g, f, st) {
   if (g.cls === "necromancer") g.graveChill = 3;
   if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 6);
   const kprocs = eqProcs(g);
-  if (kprocs.has("lifedrink")) g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.06));
+  if (kprocs.has("lifedrink")) g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * procPower(g, "lifedrink")));
   if (kprocs.has("hastewind") && Math.random() < 0.15) {
-    for (const ck of Object.keys(g.cds)) g.cds[ck] = Math.max(0, g.cds[ck] - 1);
+    const hw = procPower(g, "hastewind");
+    for (const ck of Object.keys(g.cds)) g.cds[ck] = Math.max(0, g.cds[ck] - hw);
   }
 
   const t = g.zone + 1;
@@ -1944,6 +2063,7 @@ function step(prev) {
   if (b.vowT > 0) b.vowT -= dt;
   if (b.communeT > 0) b.communeT -= dt;
   if (b.slowT > 0) b.slowT -= dt;
+  if (b.slowT <= 0) b.slowAmt = 0; // a trait's chill never lingers onto a skill's
   if (g.restedT > 0) g.restedT = Math.max(0, g.restedT - dt);
   if (g.graveChill > 0) g.graveChill -= 1;
 
@@ -2011,8 +2131,9 @@ function step(prev) {
      and the Ashborn's +10% fire ember. Immune bosses null their own element. */
   const wInf = (g.eq.weapon && g.eq.weapon.infuse) || null;
   const hitOne = (foe, mult, el) => {
+    const gm = gapMult(g.level, foe.lvl);
     const isCrit = Math.random() * 100 < critCh;
-    let dmg = Math.max(1, Math.round(baseAtk * mult * voidMul * rnd(0.85, 1.15) * (isCrit ? critDmg : 1)));
+    let dmg = Math.max(1, Math.round(baseAtk * mult * voidMul * gm * rnd(0.85, 1.15) * (isCrit ? critDmg : 1)));
     if (el) {
       dmg = Math.max(0, Math.round(dmg * foeElemMod(el, foe) * bgElMul(g, el)));
     } else {
@@ -2034,7 +2155,7 @@ function step(prev) {
     if (isCrit && g.cls === "stormcaller") {
       for (const f2 of foes) {
         if (f2 === foe || f2.hp <= 0) continue;
-        const arc = Math.max(1, Math.round(baseAtk * 0.35 * foeElemMod("storm", f2)));
+        const arc = Math.max(1, Math.round(baseAtk * 0.35 * gapMult(g.level, f2.lvl) * foeElemMod("storm", f2)));
         f2.hp -= arc;
       }
       if (foes.length > 1) fx.push({ id: floatSeq++, text: "雷 arc", crit: false, side: "enemy" });
@@ -2362,7 +2483,7 @@ function step(prev) {
     }
     if (petCfg && g.pet && g.pet.hp > 0 && foes[0]) {
       const petAtk = st.atk * petCfg.atkShare * b.atkMult * (bossFight ? 1 + 0.12 * fullSets : 1);
-      const bd = Math.max(1, Math.round(petAtk * rnd(0.85, 1.15)));
+      const bd = Math.max(1, Math.round(petAtk * gapMult(g.level, foes[0].lvl) * rnd(0.85, 1.15)));
       foes[0].hp -= bd;
       fx.push({ id: floatSeq++, text: companionForm(g).glyph + " −" + fmt(bd), crit: false, side: "beast" });
     }
@@ -2378,30 +2499,32 @@ function step(prev) {
   const procs = eqProcs(g);
   if (foes.length && g.cls !== "vowkeeper") {
     if (procs.has("scorch") && b.dotT <= 0 && Math.random() < 0.12) {
-      b.dot = Math.round(st.atk * 0.6); b.dotT = 3; b.dotEl = "fire";
+      b.dot = Math.round(st.atk * procPower(g, "scorch")); b.dotT = 3; b.dotEl = "fire";
       fx.push({ id: floatSeq++, text: "Scorch", crit: false, side: "enemy" });
     }
     if (procs.has("frostbite") && b.slowT <= 0 && Math.random() < 0.12) {
-      b.slowT = 4;
+      b.slowT = 4; b.slowAmt = procPower(g, "frostbite");
       fx.push({ id: floatSeq++, text: "Frostbite", crit: false, side: "enemy" });
     }
     if (procs.has("stormbrand") && foes[0] && Math.random() < 0.1) {
-      const d2 = Math.max(1, Math.round(st.atk * 1.5 * rnd(0.85, 1.15) * foeElemMod("storm", foes[0])));
+      const d2 = Math.max(1, Math.round(st.atk * procPower(g, "stormbrand") * rnd(0.85, 1.15) * gapMult(g.level, foes[0].lvl) * foeElemMod("storm", foes[0])));
       foes[0].hp -= d2;
       fx.push({ id: floatSeq++, text: "⚡−" + fmt(d2), crit: false, side: "enemy" });
     }
     if (procs.has("chainarc") && Math.random() < 0.08) {
       let tot = 0;
-      for (const foe2 of foes) { const d3 = Math.max(1, Math.round(st.atk * 0.9 * rnd(0.85, 1.15) * foeElemMod("storm", foe2))); foe2.hp -= d3; tot += d3; }
+      const cw = procPower(g, "chainarc");
+      for (const foe2 of foes) { const d3 = Math.max(1, Math.round(st.atk * cw * rnd(0.85, 1.15) * gapMult(g.level, foe2.lvl) * foeElemMod("storm", foe2))); foe2.hp -= d3; tot += d3; }
       fx.push({ id: floatSeq++, text: "Arc −" + fmt(tot), crit: false, side: "enemy" });
     }
     if (procs.has("cindernova") && Math.random() < 0.06) {
       let tot = 0;
-      for (const foe2 of foes) { const d3 = Math.max(1, Math.round(st.atk * 1.3 * rnd(0.85, 1.15) * foeElemMod("fire", foe2))); foe2.hp -= d3; tot += d3; }
+      const nw = procPower(g, "cindernova");
+      for (const foe2 of foes) { const d3 = Math.max(1, Math.round(st.atk * nw * rnd(0.85, 1.15) * gapMult(g.level, foe2.lvl) * foeElemMod("fire", foe2))); foe2.hp -= d3; tot += d3; }
       fx.push({ id: floatSeq++, text: "Nova −" + fmt(tot), crit: true, side: "enemy" });
     }
     if (procs.has("leechfang") && Math.random() < 0.1) {
-      const hl = Math.round(st.maxHp * 0.02);
+      const hl = Math.round(st.maxHp * procPower(g, "leechfang"));
       g.hp = Math.min(st.maxHp, g.hp + hl);
       fx.push({ id: floatSeq++, text: "+" + fmt(hl), crit: false, side: "player", heal: true });
     }
@@ -2465,7 +2588,7 @@ function step(prev) {
     const mul = b.vowT > 0 ? 1.6 : 1;
     const shock = Math.max(1, Math.round((st.atk * 0.75 + vowHarm * 1.3) * mul));
     let total = 0;
-    for (const f2 of foes) if (f2.hp > 0) { f2.hp -= shock; total += shock; }
+    for (const f2 of foes) if (f2.hp > 0) { const d2 = Math.max(1, Math.round(shock * gapMult(g.level, f2.lvl))); f2.hp -= d2; total += d2; }
     vowHarm = 0;
     if (total) fx.push({ id: floatSeq++, text: "誓 −" + fmt(total), crit: b.vowT > 0, side: "enemy" });
   };
@@ -2502,7 +2625,7 @@ function step(prev) {
         }
       }
     }
-    const slowed = (b.slowT > 0 ? 0.7 : 1) * (g.graveChill > 0 ? 0.92 : 1);
+    const slowed = (b.slowT > 0 ? 1 - (b.slowAmt || 0.3) : 1) * (g.graveChill > 0 ? 0.92 : 1);
     if (petFront) {
       const petDef = st.def * petCfg.petDefMul;
       let edmgP = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(petDef, f.lvl))));
@@ -2534,11 +2657,11 @@ function step(prev) {
       if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 3);
       fx.push({ id: floatSeq++, text: (f.el ? ELEMENTS[f.el].glyph : "") + "−" + fmt(edmg), crit: false, side: "player" });
       if (procs.has("stoneveil") && Math.random() < 0.1) {
-        gainShield(st.maxHp * 0.12);
+        gainShield(st.maxHp * procPower(g, "stoneveil"));
         fx.push({ id: floatSeq++, text: "⛨ Stoneveil", crit: false, side: "player", heal: true });
       }
       if (procs.has("thornmail") && Math.random() < 0.12) {
-        const rd = Math.max(1, Math.round(st.atk * 0.4));
+        const rd = Math.max(1, Math.round(st.atk * procPower(g, "thornmail") * gapMult(g.level, f.lvl)));
         f.hp -= rd;
         fx.push({ id: floatSeq++, text: "Thorns −" + fmt(rd), crit: false, side: "enemy" });
       }
@@ -2622,8 +2745,8 @@ function applyOffline(g) {
   const echoMult = 1 + (g.echoes || 0) * 0.01;
   const setB = setTiers(g).t;
   const setRewardMult = 1 + 0.06 * setB.binding + 0.04 * setB.chime;
-  const gold = Math.round(kills * eGold(mid) * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1.1 : 1) * (g.bg === "noble" ? 1.08 : 1) * (g.bg === "rod" ? 1.05 : 1));
-  const xp = Math.round(kills * eXp(mid) * sc * (rmods.xp || 1) * echoMult * setRewardMult * (eqProcs(g).has("sagemind") ? 1.08 : 1) * (g.bg === "scholar" ? 1.1 : 1));
+  const gold = Math.round(kills * eGold(mid) * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1 + procPower(g, "greedglint") : 1) * (g.bg === "noble" ? 1.08 : 1) * (g.bg === "rod" ? 1.05 : 1));
+  const xp = Math.round(kills * eXp(mid) * sc * (rmods.xp || 1) * echoMult * setRewardMult * (eqProcs(g).has("sagemind") ? 1 + procPower(g, "sagemind") : 1) * (g.bg === "scholar" ? 1.1 : 1));
   g.gold += gold;
   g.xp += xp;
   g.kills[g.zone] = Math.min(99999, g.kills[g.zone] + kills);
@@ -2706,6 +2829,11 @@ function migrate(raw) {
       const opts = usableWtypes(cls);
       const pref = (CLASS_MASTERY[cls] || []).find((w) => opts.includes(w));
       if (pref || opts.length) x = { ...x, wtype: pref || opts[0] };
+    }
+    if (itemProcs(x).length && !x.pw) {
+      const m = itemProcsMap(x); const pw = {};
+      for (const cat in m) pw[cat] = pwAt(m[cat], 3); // grandfathered at T3
+      x = { ...x, pw };
     }
     if (isArmorSlot(x.slot) && !ARMOR_TYPES[x.atype]) {
       x = { ...x, atype: legacyGear ? armorsFor(cls)[0] : pick(ARMOR_KEYS) };
@@ -3505,26 +3633,36 @@ function App() {
       if (!it) { pushLog(g, "Nothing is equipped in that slot.", "sys"); return g; }
       const avail = enchantCatsFor(it);
       if (!avail.length) { pushLog(g, `${RARITIES[it.rarity].name} gear is too plain to bind enchantments — reforge it to a higher rarity first.`, "sys"); return g; }
-      const cur = itemProcsMap(it);
-      const filled = avail.filter((c) => cur[c]);
-      const rerollAll = filled.length === 0 || filled.length === avail.length;
-      const targets = rerollAll ? avail : avail.filter((c) => !cur[c]);
-      const nS = targets.length;
-      const glyphC = 2 * nS, essC = 3 * nS, goldC = Math.round(45 * costScale(it.tier) * nS * (g.bg === "smith" ? 0.85 : 1) * (g.race === "ironkin" ? 0.88 : 1));
+      /* The rite re-forges the whole trait set, and the COUNT obeys the same
+         rarity law as a fresh drop — so no amount of essence buys extra slots.
+         On Mythic and above a category may be SEALED for +50% essence, which
+         guarantees one trait of that kind and turns re-roll waste into a
+         priced choice. */
+      const rule = ENCHANT_DROP[it.rarity] || { g: 0, p: 0 };
+      const canLock = it.rarity >= 5;
+      const lockOn = canLock && lockCat && avail.includes(lockCat) ? lockCat : null;
+      const nS = avail.length;
+      const glyphC = 2 * nS;
+      const essC = Math.round(3 * nS * (lockOn ? 1.5 : 1));
+      const goldC = Math.round(45 * costScale(it.tier) * nS * (g.bg === "smith" ? 0.85 : 1) * (g.race === "ironkin" ? 0.88 : 1));
       if ((g.materials.glyph || 0) < glyphC || (g.essence || 0) < essC || g.gold < goldC) {
         pushLog(g, `The rite asks ${glyphC}× Glyph Dust, ${essC}精 and ${fmt(goldC)} gold.`, "sys");
         return g;
       }
       g.materials.glyph -= glyphC; g.essence -= essC; g.gold -= goldC;
-      const np = { ...cur };
-      if (rerollAll) for (const c of avail) delete np[c];
-      for (const c of targets) np[c] = pick(procsOfCat(c));
-      g.eq = { ...g.eq, [forgeSlot]: { ...it, procs: np, proc: undefined } };
-      const names = targets.map((c) => "✦" + PROCS[np[c]].name).join(" · ");
-      pushLog(g, filled.length === avail.length
-        ? `The bound group re-rolls whole: ${names}.`
-        : `Enchanted — ${nS} trait${nS > 1 ? "s" : ""} woven: ${names}.`, "lvl");
-      if (avail.every((c) => np[c])) pushRibbon(g, avail.length >= 4 ? "FULLY ENCHANTED" : "ENCHANT SEALED", C.violet);
+      let count = rule.g + (Math.random() < rule.p ? 1 : 0);
+      count = Math.min(count, avail.length);
+      const order = lockOn ? [lockOn, ...avail.filter((c) => c !== lockOn)] : shuffled(avail);
+      const np = {};
+      const npw = {};
+      for (const c of order.slice(0, count)) { const pl = poolOfCat(it.slot, c); if (pl.length) { np[c] = pick(pl); npw[c] = rollProcPw(np[c], it.rarity); } }
+      g.eq = { ...g.eq, [forgeSlot]: { ...it, procs: np, pw: npw, proc: undefined } };
+      const got = Object.keys(np);
+      const names = got.map((c) => `✦${PROCS[np[c]].name} T${pwTier(np[c], npw[c])}`).join(" · ");
+      pushLog(g, got.length
+        ? `The rite takes: ${names}${lockOn ? ` (${lockOn} sealed)` : ""}.`
+        : "The rite takes nothing — the metal refuses every mark.", got.length ? "lvl" : "sys");
+      if (got.length >= (ENCHANT_CAP[it.rarity] || 0) && got.length >= 3) pushRibbon(g, "THREE MARKS BOUND", C.violet);
       return g;
     });
 
@@ -3558,16 +3696,19 @@ function App() {
       if (!it) { pushLog(g, "Nothing is equipped in that slot.", "sys"); return g; }
       if (((g.runes || {})[pid] || 0) < 1) return g;
       const cat = PROCS[pid].cat;
+      if (!enchantPool(it.slot).includes(pid)) { pushLog(g, `A ${SLOTS[it.slot].name} will not bear ✦${PROCS[pid].name} — that rune belongs to other gear.`, "sys"); return g; }
       if (!enchantCatsFor(it).includes(cat)) { pushLog(g, `This ${RARITIES[it.rarity].name} ${SLOTS[it.slot].name} can't hold a ${cat} trait — reforge it higher.`, "sys"); return g; }
       g.runes = { ...g.runes, [pid]: g.runes[pid] - 1 };
       if (g.runes[pid] <= 0) delete g.runes[pid];
       const np = { ...itemProcsMap(it), [cat]: pid };
-      g.eq = { ...g.eq, [forgeSlot]: { ...it, procs: np, proc: undefined } };
+      const npw2 = { ...(it.pw || {}), [cat]: rollProcPw(pid, it.rarity) };
+      g.eq = { ...g.eq, [forgeSlot]: { ...it, procs: np, pw: npw2, proc: undefined } };
       pushLog(g, `Rune set: ${it.name} now bears ✦${PROCS[pid].name}.`, "lvl");
       return g;
     });
 
   const [elPick, setElPick] = useState("fire");
+  const [lockCat, setLockCat] = useState(null);
 
   const wardInfusion = () =>
     forgeMutate((g) => {
@@ -3956,6 +4097,10 @@ function App() {
                     {front.name}
                   </span>
                   <span className="mono dim small">
+                    {(() => {
+                      const bd = gapBand(g.level, front.lvl);
+                      return bd > 0 ? <span className="gaptag" style={{ color: bd === 2 ? C.cinnabar : C.gilt }}>{bd === 2 ? "☠☠" : "☠"} </span> : null;
+                    })()}
                     Lv {front.lvl}{g.waveSize > 1 ? ` · ${g.enemies.length}/${g.waveSize}` : ""}
                   </span>
                 </div>
@@ -4196,8 +4341,12 @@ function App() {
                 </div>
               ))}
               <div className="tiny dim" style={{ marginTop: 4 }}>Chances roll once per battle tick (0.6s) or per trigger.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>Roll brackets — rarity buys quality</div>
+              <div className="tiny dim">Every trait names a magnitude, and rarity decides how strongly it may roll: Rare and below roll <b>T1–T2</b>, Epic <b>T2–T3</b>, Legendary <b>T3–T4</b>, Mythic the <b>top half of T4</b>, and Eternal always the <b>maximum</b>. So a Legendary Scorch might burn for 0.68×ATK/s where a Rare one manages 0.38 — the same trait, a different grade of work. The bench shows each trait's tier and rolled value, and since Eternal always max-rolls, the range-chase ends exactly where the count-chase does.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>Striking above your weight</div>
+              <div className="tiny dim">Foes above your level turn your blows aside: the loss grows as <b>1.5d + 0.85d²</b> percent for a gap of d levels, capped at 85% — steep, but never a locked door. It applies last, to everything you deal (skills, burns, companion, traits alike) and never changes what you TAKE. Rewards climb +7% per level of gap but stop at +20%, so the efficient hunting band is <b>+1 to +3</b>; past that the penalty outgrows the prize. Watch the level: one <span style={{ color: C.gilt }}>☠</span> marks +4 (discouraged), two <span style={{ color: C.cinnabar }}>☠☠</span> marks +7 (a wall). Prey far below you pays less, down to −60%.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Enchant slots by rarity</div>
-              <div className="tiny dim">An item's rarity sets how many trait slots it can ever hold, and its equipment type sets which categories fill first — so gear reads logically: <b style={{ color: C.cinnabar }}>weapons</b> lean offensive, <b style={{ color: C.storm }}>armor</b> defensive, trinkets utility, boots/cloak/gloves sustain. <b>Common: 0 — cannot be enchanted.</b> Uncommon: 1 slot. Rare: 2. Epic &amp; Legendary: 3. Mythic: 4. <b style={{ color: RARITIES[6].color }}>Eternal: all 4, every type guaranteed.</b></div>
+              <div className="tiny dim">Rarity sets how many traits a piece can hold, and the ceiling is <b>three</b> — quantity stops climbing at Mythic, which spends its rarity on quality instead, so there is nothing left to burn essence re-forging for. Common: none · Uncommon: 1 at 15% · Rare: 1 at 40% · Epic: 1 certain, 20% for a second · Legendary: 1 certain, 35% for a second · Mythic and Eternal: 2 certain, 12% for a third. The bench obeys the same law — essence never buys extra slots, only new marks. Equipment type decides WHICH traits a piece will bear at all: <b style={{ color: C.cinnabar }}>weapons</b> lean offensive, <b style={{ color: C.storm }}>armor</b> defensive, trinkets utility, boots/cloak/gloves sustain. <b>Common: 0 — cannot be enchanted.</b> Uncommon: 1 slot. Rare: 2. Epic &amp; Legendary: 3. Mythic: 4. <b style={{ color: RARITIES[6].color }}>Eternal: all 4, every type guaranteed.</b></div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Traits born INTO a drop are uncommon, and grow likelier only with rarity: Uncommon ~18% for its one slot; Rare each of 2 slots ~22%; Epic each of 3 ~30% with nothing certain; Legendary one certain, the other two ~28%; Mythic one certain, the rest ~40%; and Eternal alone fills every slot. Most gear you find will bear no trait at all — the Enchanting bench is the dependable road, and found traits are a windfall. At the Enchanting bench, traits form a BOUND GROUP sized to the item's available slots — enchanting fills open slots (after an extraction, or a drop that arrived partial), then re-rolls them together once all are sealed. Reforging an item to a higher rarity opens more slots. Runes set one category deterministically (only where the rarity allows).</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>What stacks, what doesn't</div>
               <div className="tiny dim"><b style={{ color: C.jade }}>Stacks:</b> different traits combine freely — an item may carry one of each category (offensive + defensive + sustain + passive), and traits on different pieces all apply. Percentage SET bonds from different sets stack too, and stack on top of traits.</div>
@@ -4480,14 +4629,21 @@ function App() {
             const cap = ENCHANT_CAP[eit.rarity] || 0;
             const curMap = itemProcsMap(eit);
             const filledN = avail.filter((c) => curMap[c]).length;
-            const nS = filledN === 0 || filledN === avail.length ? avail.length : avail.length - filledN;
+            const nS = avail.length;
             const goldC = craftGold(45 * costScale(eit.tier) * nS);
+            const rule = ENCHANT_DROP[eit.rarity] || { g: 0, p: 0 };
+            const canLock = eit.rarity >= 5;
+            const lockOn = canLock && lockCat && avail.includes(lockCat) ? lockCat : null;
+            const essC = Math.round(3 * nS * (lockOn ? 1.5 : 1));
             return (
               <div className="guide">
                 <div className="tiny dim">
                   {cap === 0
                     ? `${eit.name} is ${RARITIES[eit.rarity].name} — too plain to bind any enchantment. Reforge it to Uncommon or better to open trait slots.`
-                    : `${eit.name} · ${RARITIES[eit.rarity].name} — ${cap} of 4 trait slot${cap > 1 ? "s" : ""} available (rarity sets the count; type sets the order). Enchanting fills open slots; once all available are sealed it re-rolls them together. Extract (1× Chaos Pearl) pulls a trait, 60% to keep it as a rune.`}
+                    : `${eit.name} · ${RARITIES[eit.rarity].name} — ${rule.g} trait${rule.g === 1 ? "" : "s"} certain${rule.p > 0 ? `, ${Math.round(rule.p * 100)}% for one more` : ""} (ceiling ${cap} of 3). The rite re-forges the whole set at once — essence never buys extra slots. Extract (1× Chaos Pearl) pulls a trait, 60% to keep it as a rune.`}
+                </div>
+                <div className="tiny dim" style={{ marginTop: 3 }}>
+                  This {SLOTS[eit.slot].name} will bear: {enchantPool(eit.slot).map((id) => PROCS[id].name).join(" · ")}
                 </div>
                 {PROC_CATS.map((cat) => {
                   const pid = curMap[cat];
@@ -4496,7 +4652,7 @@ function App() {
                   return (
                     <div key={cat} className="guiderow mono">
                       <span style={{ color: pid ? PROCS[pid].color : open ? C.dim : "#565d6d" }}>
-                        {cat}: {pid ? "✦" + PROCS[pid].name : open ? "— open —" : `🔒 needs ${RARITIES[needR] ? RARITIES[needR].name : "higher"}`}
+                        {cat}: {pid ? `✦${PROCS[pid].name} T${pwTier(pid, (eit.pw || {})[cat])} · ${pwText(pid, (eit.pw || {})[cat] != null ? eit.pw[cat] : pwAt(pid, 3))}` : open ? "— open —" : `🔒 needs ${RARITIES[needR] ? RARITIES[needR].name : "higher"}`}
                       </span>
                       <span className="skillacts" style={{ margin: 0 }}>
                         {pid && <button className="btn tiny ghost" onClick={() => extractProcAct(cat)}>Extract</button>}
@@ -4504,14 +4660,25 @@ function App() {
                     </div>
                   );
                 })}
+                {cap > 0 && canLock && (
+                  <>
+                    <div className="tiny dim" style={{ marginTop: 5 }}>Ember Lock — seal one kind for +50% essence; the rite must then yield at least one of it.</div>
+                    <div className="focusrow">
+                      <button className={"chip" + (!lockOn ? " on" : "")} onClick={() => setLockCat(null)}>none</button>
+                      {avail.map((cat) => (
+                        <button key={cat} className={"chip" + (lockOn === cat ? " on" : "")} onClick={() => setLockCat(cat)}>seal {cat}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
                 {cap > 0 && (
                   <button
                     className="btn"
                     style={{ borderColor: C.violet, marginTop: 4 }}
                     onClick={enchantGroup}
-                    disabled={(g.materials.glyph || 0) < 2 * nS || (g.essence || 0) < 3 * nS || g.gold < goldC}
+                    disabled={(g.materials.glyph || 0) < 2 * nS || (g.essence || 0) < essC || g.gold < goldC}
                   >
-                    {filledN === avail.length ? `Re-roll ${avail.length} trait${avail.length > 1 ? "s" : ""}` : filledN === 0 ? `Enchant (${avail.length} slot${avail.length > 1 ? "s" : ""})` : `Fill ${nS} open slot${nS > 1 ? "s" : ""}`} — {2 * nS}× Dust + {3 * nS}精 + {fmt(goldC)}g
+                    Re-forge traits{lockOn ? ` · ${lockOn} sealed` : ""} — {2 * nS}× Dust + {essC}精 + {fmt(goldC)}g
                   </button>
                 )}
                 <div className="guidetitle" style={{ marginTop: 8 }}>Elemental work</div>
@@ -4929,6 +5096,7 @@ const CSS = `
 .flame { color: ${C.gilt}; font-size: 18px; animation: flicker 1.6s ease-in-out infinite; line-height: 1; margin-bottom: 4px; }
 @keyframes flicker { 0%,100% { opacity: 0.85; transform: scaleY(1); } 50% { opacity: 1; transform: scaleY(1.15); } }
 .enemyrow { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; font-size: 13px; }
+.gaptag { letter-spacing: -1px; }
 .enemyname { color: ${C.bone}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bosstag { color: ${C.cinnabar}; border: 1px solid ${C.cinnabar}; border-radius: 3px; font-size: 9px; padding: 1px 4px; margin-right: 6px; letter-spacing: 0.1em; vertical-align: 1px; }
 .elitetag { color: ${C.storm}; border: 1px solid ${C.storm}; border-radius: 3px; font-size: 9px; padding: 1px 4px; margin-right: 6px; letter-spacing: 0.1em; vertical-align: 1px; }
