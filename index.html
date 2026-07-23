@@ -148,6 +148,43 @@ const SLOTS = {
 };
 const SLOT_KEYS = Object.keys(SLOTS);
 
+/* ---- the harness opens as you earn it ----
+   A traveller who fills all sixteen slots in the first hour outruns the whole
+   world. So the harness itself is a progression: each strap is earned with
+   levels AND with zone bosses laid low. Gear for a sealed slot still drops
+   (more rarely) and can still be worn — it simply lies DORMANT, granting
+   nothing, until the strap opens and everything you banked wakes at once. */
+const SLOT_UNLOCK = {
+  weapon: { lv: 1, bosses: 0 },
+  armor: { lv: 1, bosses: 0 },
+  boots: { lv: 4, bosses: 0 },
+  helm: { lv: 8, bosses: 0 },
+  gloves: { lv: 12, bosses: 1 },
+  belt: { lv: 16, bosses: 1 },
+  offhand: { lv: 20, bosses: 2 },
+  bracers: { lv: 25, bosses: 2 },
+  cloak: { lv: 30, bosses: 3 },
+  pauldrons: { lv: 36, bosses: 4 },
+  amulet: { lv: 42, bosses: 5 },
+  greaves: { lv: 48, bosses: 6 },
+  ring: { lv: 54, bosses: 7 },
+  talisman: { lv: 62, bosses: 8 },
+  earring: { lv: 70, bosses: 9 },
+  anklet: { lv: 78, bosses: 10 },
+};
+const bossesCleared = (g) => (g.bossDown || []).filter(Boolean).length;
+function slotUnlocked(g, slot) {
+  const r = SLOT_UNLOCK[slot];
+  if (!r) return true;
+  return g.level >= r.lv && bossesCleared(g) >= r.bosses;
+}
+const openSlots = (g) => SLOT_KEYS.filter((k) => slotUnlocked(g, k));
+const slotReqText = (slot) => {
+  const r = SLOT_UNLOCK[slot];
+  if (!r) return "";
+  return r.bosses > 0 ? `Lv ${r.lv} · ${r.bosses} boss${r.bosses > 1 ? "es" : ""} felled` : `Lv ${r.lv}`;
+};
+
 /* weapon types: speed vs damage profiles. 1H strike faster (chance of an
    extra hit each tick), 2H hit harder but occupy BOTH weapon and offhand. */
 const WEAPON_TYPES = {
@@ -274,6 +311,14 @@ function equipBlockReason(g, it) {
 }
 /* the world tends to offer what a traveller can actually use */
 let LOOT_CLS = null;
+let LOOT_OPEN = null; // straps currently open, for drop weighting
+/* a sealed strap's gear still turns up, at roughly a quarter the rate */
+function pickDropSlot() {
+  if (!LOOT_OPEN || !LOOT_OPEN.length) return pick(SLOT_KEYS);
+  const s = pick(SLOT_KEYS);
+  if (LOOT_OPEN.includes(s)) return s;
+  return Math.random() < 0.25 ? s : pick(LOOT_OPEN);
+}
 
 const MATS = [
   { key: "iron", name: "Iron Shard", color: "#9aa0ab", price: 30 },
@@ -794,7 +839,7 @@ function rollStats(slot, tier, s, rIdx, favor, wild) {
 function makeItem(tier, opts = {}) {
   const rIdx = opts.rarity != null ? opts.rarity : rollRarity(opts.minRarity || 0, opts.weights || null);
   const r = RARITIES[rIdx];
-  const slotKey = opts.slot || pick(SLOT_KEYS);
+  const slotKey = opts.slot || pickDropSlot();
   const s = tierScale(tier) * r.mult * (opts.boost || 1);
   const v = () => rnd(0.9, 1.1);
   const wtype = slotKey === "weapon"
@@ -897,7 +942,7 @@ function calcStats(g) {
   let crit = c.crit;
   for (const k of SLOT_KEYS) {
     const it = g.eq[k];
-    if (!it) continue;
+    if (!it || !slotUnlocked(g, k)) continue; // dormant strap: worn, but silent
     if (it.stats.atk) atk += it.stats.atk;
     if (it.stats.hp) maxHp += it.stats.hp;
     if (it.stats.def) def += it.stats.def;
@@ -971,9 +1016,10 @@ const SET_GROUPS = [
   { key: "chime", name: "Chime", slots: ["earring", "anklet"], text: "+1 CRIT · +4% XP & gold" },
 ];
 
-function setTiersEq(eqMap) {
+function setTiersEq(eqMap, gRef) {
   const bySet = {};
   for (const k of SLOT_KEYS) {
+    if (gRef && !slotUnlocked(gRef, k)) continue; // a dormant piece bonds nothing
     const it = eqMap[k];
     if (it && typeof it.set === "number") (bySet[it.set] = bySet[it.set] || new Set()).add(k);
   }
@@ -981,7 +1027,7 @@ function setTiersEq(eqMap) {
   const detail = {};
   for (const s in bySet) {
     const worn = bySet[s];
-    const d = { count: worn.size, groups: {}, full: worn.size >= SLOT_KEYS.length };
+    const d = { count: worn.size, groups: {}, full: worn.size >= (gRef ? openSlots(gRef).length : SLOT_KEYS.length) };
     for (const grp of SET_GROUPS) {
       d.groups[grp.key] = grp.slots.every((sl) => worn.has(sl));
       if (d.groups[grp.key]) t[grp.key]++;
@@ -991,7 +1037,7 @@ function setTiersEq(eqMap) {
   }
   return { t, detail };
 }
-function setTiers(g) { return setTiersEq(g.eq); }
+function setTiers(g) { return setTiersEq(g.eq, g); }
 
 /* item procs: buffs and debuffs that fire on their own in battle */
 /* item procs — each belongs to a category; an item holds at most ONE proc
@@ -1039,12 +1085,12 @@ const enchantCatsFor = (it) => (it ? enchantCatsForSlot(it.slot, it.rarity) : []
    remaining available slot filled with probability p. Scales with rarity so
    higher tiers guarantee more and top tier guarantees every available type. */
 const ENCHANT_DROP = [
-  { g: 0, p: 0 },     // Common — none
-  { g: 0, p: 0.4 },   // Uncommon (cap 1)
-  { g: 0, p: 0.45 },  // Rare (cap 2)
-  { g: 1, p: 0.4 },   // Epic (cap 3)
-  { g: 1, p: 0.5 },   // Legendary (cap 3)
-  { g: 2, p: 0.55 },  // Mythic (cap 4)
+  { g: 0, p: 0 },     // Common — never
+  { g: 0, p: 0.18 },  // Uncommon (cap 1)
+  { g: 0, p: 0.22 },  // Rare (cap 2)
+  { g: 0, p: 0.3 },   // Epic (cap 3) — nothing certain
+  { g: 1, p: 0.28 },  // Legendary (cap 3) — one certain
+  { g: 1, p: 0.4 },   // Mythic (cap 4) — one certain
   { g: 4, p: 1 },     // Eternal (cap 4) — all guaranteed
 ];
 function rollDropEnchants(slot, rarity, forcedPid) {
@@ -1070,7 +1116,7 @@ function ensureProc(it) {
 }
 function eqProcs(g) {
   const s = new Set();
-  for (const k of SLOT_KEYS) for (const pid of itemProcs(g.eq[k])) s.add(pid);
+  for (const k of SLOT_KEYS) { if (!slotUnlocked(g, k)) continue; for (const pid of itemProcs(g.eq[k])) s.add(pid); }
   return s;
 }
 /* player's total resistance to an element: gear wards + bloodline + past life,
@@ -1087,6 +1133,7 @@ function playerRes(g, el) {
   if (!el) return 0;
   let r = 0;
   for (const k of SLOT_KEYS) {
+    if (!slotUnlocked(g, k)) continue;
     const it = g.eq[k];
     if (it && it.res && it.res.el === el) r += it.res.pct;
   }
@@ -1231,7 +1278,7 @@ function newGame(cls, name, race = "human", bg = "farmhand") {
     bounty: null, bountyCd: 0,
     echoes: 0, rebirths: 0,
     vault: [], runes: {}, pendingUpgrades: [],
-    rage: 0, chrono: 0, pet: null, formation: "front",
+    rage: 0, chrono: 0, pet: null, formation: "front", openSeen: ["weapon", "armor"], forgeLog: [],
     ascension: 0, throneKills: 0, huntRank: ZONES.map(() => 0),
     loadoutIdx: 0, loadouts: [null, null, null],
     loadoutFocus: [null, null, null],
@@ -1347,7 +1394,7 @@ function eqWith(eqMap, slot, item) {
 // stat-equivalent worth of the set bonds active in a given equip map, scaled to
 // the character's current totals and weighted by the same focus preference.
 function bondPoints(g, refSt, w, eqMap) {
-  const { t: sT, detail } = setTiersEq(eqMap);
+  const { t: sT, detail } = setTiersEq(eqMap, g);
   let aPct = 0.06 * sT.edge + 0.04 * sT.grip + 0.08 * sT.full;
   let hPct = 0.06 * sT.bulwark + 0.06 * sT.warplate + 0.08 * sT.full;
   let dPct = 0.06 * sT.bulwark + 0.04 * sT.veil + 0.04 * sT.grip + 0.08 * sT.full;
@@ -1809,6 +1856,7 @@ function step(prev) {
   if (prev.paused) return prev;
   RARITY_LUCK = prev.bg === "gambler" ? 0.18 : 0;
   LOOT_CLS = prev.cls;
+  LOOT_OPEN = openSlots(prev);
   const g = {
     ...prev,
     buffs: { ...prev.buffs }, cds: { ...prev.cds },
@@ -2252,6 +2300,16 @@ function step(prev) {
     }
   }
 
+  {
+    const seen = g.openSeen || [];
+    const nowOpen = openSlots(g);
+    const fresh = nowOpen.filter((k) => !seen.includes(k));
+    if (fresh.length) {
+      g.openSeen = nowOpen;
+      for (const k of fresh) pushLog(g, `Your harness gives — the ${SLOTS[k].name} strap opens. Anything you banked for it wakes now.`, "lvl");
+      pushRibbon(g, fresh.length > 1 ? "STRAPS OPEN" : `${SLOTS[fresh[0]].name.toUpperCase()} STRAP OPEN`, C.gilt);
+    }
+  }
   const wasHurt = !!g.hurtLastTick; // the PREVIOUS beat, before we clear it
   g.hurtLastTick = false;
   if (g.cls === "ravager" && foes.length) g.rage = Math.min(100, (g.rage || 0) + 2);
@@ -2295,7 +2353,7 @@ function step(prev) {
       if (spdEff > 1 && Math.random() < spdEff - 1) dealFront(0.8 * heroMul * mMul);
       if (g.cls === "chronomancer" && g.chrono === 0) dealFront(0.9 * heroMul * mMul, "Echo");
     }
-    if (g.cls === "blademaster") {
+    if (g.cls === "blademaster" && slotUnlocked(g, "offhand")) {
       const off = g.eq.offhand;
       if (off && off.wtype && WEAPON_TYPES[off.wtype] && WEAPON_TYPES[off.wtype].hands === 1) {
         const oMul = WEAPON_TYPES[off.wtype].dmg * (masteryOf(g, off) ? 1.1 : 1);
@@ -2526,6 +2584,7 @@ function step(prev) {
 function applyOffline(g) {
   RARITY_LUCK = g.bg === "gambler" ? 0.18 : 0;
   LOOT_CLS = g.cls;
+  LOOT_OPEN = openSlots(g);
   const now = Date.now();
   const sec = clamp((now - (g.savedAt || now)) / 1000, 0, 8 * 3600);
   if (sec < 90) return { g, report: null };
@@ -2661,6 +2720,8 @@ function migrate(raw) {
   g.rage = clamp(raw.rage || 0, 0, 100);
   g.chrono = 0;
   g.formation = raw.formation === "back" ? "back" : "front";
+  g.openSeen = Array.isArray(raw.openSeen) ? raw.openSeen : openSlots(g);
+  g.forgeLog = Array.isArray(raw.forgeLog) ? raw.forgeLog.slice(-80) : [];
   g.ascension = Math.max(0, raw.ascension | 0);
   g.throneKills = Math.max(0, raw.throneKills | 0);
   g.huntRank = ZONES.map((_, i) => clamp((Array.isArray(raw.huntRank) ? raw.huntRank[i] : 0) | 0, 0, 10));
@@ -3068,6 +3129,21 @@ function App() {
       return g;
     });
 
+  /* forge actions report to the anvil's own ledger as well as the main chronicle:
+     whatever an action logs is mirrored here so the smith can watch the work. */
+  const forgeMutate = (fn) =>
+    mutate((g) => {
+      const lastId = g.log.length ? g.log[g.log.length - 1].id : 0;
+      const out = fn(g) || g;
+      const fresh = (out.log || []).filter((l) => l.id > lastId);
+      if (fresh.length) {
+        out.forgeLog = [...(out.forgeLog || []), ...fresh.map((l) => ({ id: l.id, msg: l.msg, kind: l.kind }))].slice(-80);
+      }
+      return out;
+    });
+
+  const clearForgeLog = () => mutate((g) => { g.forgeLog = []; return g; });
+
   const toggleFormation = () =>
     mutate((g) => {
       if (!companionCfg(g)) return g;
@@ -3172,7 +3248,7 @@ function App() {
   const togglePause = () => mutate((g) => { g.paused = !g.paused; return g; });
 
   const buyMat = (mi2) =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const m = MATS[mi2];
       const price = Math.round(m.price * (g.bg === "merchant" ? 0.88 : 1));
       if (g.gold < price) { pushLog(g, "Not enough gold.", "sys"); return g; }
@@ -3183,7 +3259,7 @@ function App() {
     });
 
   const buyTonic = () =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const price = Math.round(35 * costScale(g.zone + 1) * (g.bg === "merchant" ? 0.88 : 1));
       if (g.gold < price) { pushLog(g, "Not enough gold.", "sys"); return g; }
       g.gold -= price;
@@ -3210,7 +3286,7 @@ function App() {
     });
 
   const focusedForge = () =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const t = g.zone + 1;
       const mat = MATS[matIdxForTier(t)];
       const goldCost = Math.round(120 * costScale(t) * (g.bg === "smith" ? 0.85 : 1) * (g.race === "ironkin" ? 0.88 : 1));
@@ -3227,7 +3303,7 @@ function App() {
     });
 
   const temper = () =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const it = g.eq[forgeSlot];
       if (!it) { pushLog(g, "Nothing is equipped in that slot.", "sys"); return g; }
       const tp = it.temper || 0;
@@ -3250,7 +3326,7 @@ function App() {
     });
 
   const autoForge = () =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const t = g.zone + 1;
       const mi2 = matIdxForTier(t);
       const mat = MATS[mi2];
@@ -3424,7 +3500,7 @@ function App() {
     });
 
   const enchantGroup = () =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const it = g.eq[forgeSlot];
       if (!it) { pushLog(g, "Nothing is equipped in that slot.", "sys"); return g; }
       const avail = enchantCatsFor(it);
@@ -3453,7 +3529,7 @@ function App() {
     });
 
   const extractProcAct = (cat) =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const it = g.eq[forgeSlot];
       const pid = it && itemProcsMap(it)[cat];
       if (!pid) { pushLog(g, "No such trait on that piece.", "sys"); return g; }
@@ -3477,7 +3553,7 @@ function App() {
     });
 
   const applyRune = (pid) =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const it = g.eq[forgeSlot];
       if (!it) { pushLog(g, "Nothing is equipped in that slot.", "sys"); return g; }
       if (((g.runes || {})[pid] || 0) < 1) return g;
@@ -3494,7 +3570,7 @@ function App() {
   const [elPick, setElPick] = useState("fire");
 
   const wardInfusion = () =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const it = g.eq[forgeSlot];
       if (!it) { pushLog(g, "Nothing is equipped in that slot.", "sys"); return g; }
       const pct = +clamp((0.06 + it.rarity * 0.03), 0.06, 0.25).toFixed(2);
@@ -3507,7 +3583,7 @@ function App() {
     });
 
   const edgeInfusion = (chaos) =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const it = g.eq[forgeSlot];
       if (!it || it.slot !== "weapon") { pushLog(g, "Only weapons take an elemental edge.", "sys"); return g; }
       if (chaos && it.rarity < 6) { pushLog(g, "Only an Eternal blade can hold CHAOS.", "sys"); return g; }
@@ -3521,7 +3597,7 @@ function App() {
     });
 
   const openPouch = () =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const t2 = g.zone + 1;
       const cost = Math.round(90 * costScale(t2) * (g.bg === "merchant" ? 0.88 : 1));
       if (g.gold < cost) { pushLog(g, "Grey-Whisker sniffs at your empty purse.", "sys"); return g; }
@@ -3543,7 +3619,7 @@ function App() {
     });
 
   const openChest = () =>
-    mutate((g) => {
+    forgeMutate((g) => {
       const t2 = g.zone + 1;
       const cost = Math.round(260 * costScale(t2) * (g.bg === "merchant" ? 0.88 : 1));
       if ((g.materials.pearl || 0) < 1 || g.gold < cost) {
@@ -4088,6 +4164,9 @@ function App() {
                 </div>
               ))}
               <div className="tiny dim" style={{ marginTop: 4 }}>Speed above 1.0 is the chance of an extra basic strike each tick; two-handers trade speed for heavier blows and seal the offhand while gripped. Each class masters certain types for +10% weapon damage — Warrior: sword/greatsword/glaive · Blademaster: sword/saber/dagger (and may wield a second one-hander, striking with both) · Mage: staff/whisk · Taoist: fists/whisk/staff · Beastcaller: saber/glaive/dagger · Monk: fists/staff/whisk · Shadow: dagger/saber · Sentinel: sword/glaive · Ranger: dagger/saber · Berserker: greatsword/glaive/saber · Warlock, Cleric, Necromancer: staff/whisk · Samurai: sword/saber · Druid: staff/fist · Spellblade: sword/saber/staff. Fist weapons are hand-to-hand: two-handed yet fastest of all.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>The harness — straps open as you earn them</div>
+              <div className="tiny dim">You do not begin with all sixteen slots. A traveller who fills every strap in the first hour outruns the world entirely, so the harness itself is progression: each slot opens at a level AND a count of zone bosses laid low — boots at Lv 4, helm at 8, gloves at 12 (1 boss), belt 16, offhand 20 (2), bracers 25, cloak 30 (3), pauldrons 36 (4), amulet 42 (5), greaves 48 (6), ring 54 (7), talisman 62 (8), earring 70 (9), anklet 78 (10 bosses). Your stat sheet always names the next one.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Gear for a SEALED strap still drops — at roughly a quarter the usual rate — and you may wear it early. It simply lies <b style={{ color: "#8a7f5a" }}>dormant</b>: no stats, no traits, no wards, no set bonds, nothing, until the strap opens. Then everything you banked wakes at once, which is why an opening is worth celebrating.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Steel, cloth and plate — what your school carries</div>
               <div className="tiny dim">Every weapon wounds in one of three ways — <b style={{ color: DAMAGE_CLASSES.slash.color }}>刃 Slash</b> (sword, saber, greatsword), <b style={{ color: DAMAGE_CLASSES.pierce.color }}>刺 Pierce</b> (dagger, glaive), <b style={{ color: DAMAGE_CLASSES.blunt.color }}>捶 Blunt</b> (staff, whisk, fists) — and every school trains in some and refuses others. A Cleric keeps to staff and whisk and will not carry an edge; a Samurai answers only with the cut; a Ravager takes whatever is nearest. Training is permission; mastery (the green tag) is excellence atop it.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Worn armor has a WEIGHT, and weight decides the shape of its virtues: <b style={{ color: ARMOR_TYPES.robe.color }}>袍 Robe</b> spends shelter for power (−DEF −HP, +ATK +CRIT) · <b style={{ color: ARMOR_TYPES.light.color }}>轻 Light</b> stays swift and keen · <b style={{ color: ARMOR_TYPES.medium.color }}>中 Medium</b> balances · <b style={{ color: ARMOR_TYPES.heavy.color }}>重 Heavy</b> hoards shelter at the cost of edge. Totals stay close across the four — the trade is real, not a ladder. Weight applies to armor, helm, pauldrons, greaves, bracers, gloves and boots; trinkets, cloaks, belts and offhands are unweighted and open to all.</div>
@@ -4119,7 +4198,7 @@ function App() {
               <div className="tiny dim" style={{ marginTop: 4 }}>Chances roll once per battle tick (0.6s) or per trigger.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Enchant slots by rarity</div>
               <div className="tiny dim">An item's rarity sets how many trait slots it can ever hold, and its equipment type sets which categories fill first — so gear reads logically: <b style={{ color: C.cinnabar }}>weapons</b> lean offensive, <b style={{ color: C.storm }}>armor</b> defensive, trinkets utility, boots/cloak/gloves sustain. <b>Common: 0 — cannot be enchanted.</b> Uncommon: 1 slot. Rare: 2. Epic &amp; Legendary: 3. Mythic: 4. <b style={{ color: RARITIES[6].color }}>Eternal: all 4, every type guaranteed.</b></div>
-              <div className="tiny dim" style={{ marginTop: 4 }}>On a fresh drop, higher rarity guarantees more and rolls the rest by chance: Uncommon ~40% for its one trait; Rare each of 2 slots ~45%; Epic 1 guaranteed +~40% for more; Legendary 1 guaranteed +~50%; Mythic 2 guaranteed +~55%; Eternal fills every slot. At the Enchanting bench, traits form a BOUND GROUP sized to the item's available slots — enchanting fills open slots (after an extraction, or a drop that arrived partial), then re-rolls them together once all are sealed. Reforging an item to a higher rarity opens more slots. Runes set one category deterministically (only where the rarity allows).</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Traits born INTO a drop are uncommon, and grow likelier only with rarity: Uncommon ~18% for its one slot; Rare each of 2 slots ~22%; Epic each of 3 ~30% with nothing certain; Legendary one certain, the other two ~28%; Mythic one certain, the rest ~40%; and Eternal alone fills every slot. Most gear you find will bear no trait at all — the Enchanting bench is the dependable road, and found traits are a windfall. At the Enchanting bench, traits form a BOUND GROUP sized to the item's available slots — enchanting fills open slots (after an extraction, or a drop that arrived partial), then re-rolls them together once all are sealed. Reforging an item to a higher rarity opens more slots. Runes set one category deterministically (only where the rarity allows).</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>What stacks, what doesn't</div>
               <div className="tiny dim"><b style={{ color: C.jade }}>Stacks:</b> different traits combine freely — an item may carry one of each category (offensive + defensive + sustain + passive), and traits on different pieces all apply. Percentage SET bonds from different sets stack too, and stack on top of traits.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}><b style={{ color: C.cinnabar }}>Doesn't stack:</b> the SAME trait twice does nothing the second time. Traits are all-or-nothing flags, not additive percentages — for example <b>Ironblood (+6% max HP)</b> on two pieces still grants <b>+6%, not +12%</b>; a second Ironblood is wasted. Likewise two Scorches don't burn harder, two Greedglints don't pay more. One offensive trait per item also means <b>Scorch and Stormbrand can't share a piece</b> (same category). The upgrade valuation knows this: a trait adds worth only when no other worn piece already grants it.</div>
@@ -4168,25 +4247,28 @@ function App() {
             {SLOT_KEYS.map((k) => {
               const it = g.eq[k];
               const lk = g.locked && g.locked[k];
+              const sealed = !slotUnlocked(g, k);
               return (
-                <div key={k} className={"eqslot" + (lk ? " lockedslot" : "")} style={it ? { borderColor: RARITIES[it.rarity].color } : {}}>
+                <div key={k} className={"eqslot" + (lk ? " lockedslot" : "") + (sealed ? " sealedslot" : "")} style={it && !sealed ? { borderColor: RARITIES[it.rarity].color } : {}}>
                   <button className={"lockbtn" + (lk ? " on" : "")} onClick={() => toggleLock(k)}>
                     {lk ? "locked" : "lock"}
                   </button>
                   <div className="slothead">
                     <ItemIcon slot={it && it.wtype ? "weapon" : k} color={it ? RARITIES[it.rarity].color : "#565d6d"} size={16} />
                     <span className="dim tiny">{SLOTS[k].name}</span>
+                    {sealed && <span className="sealtag mono">sealed · {slotReqText(k)}</span>}
                   </div>
                   {it ? (
                     <>
                       <div className="itemname" style={{ color: RARITIES[it.rarity].color }}>{it.name}{it.temper ? ` +${it.temper}` : ""}{typeof it.set === "number" && <span className="settag">set</span>}{masteryOf(g, it) && <span className="settag" style={{ borderColor: C.jade, color: C.jade }}>mastery</span>}{!canEquip(g, it) && <span className="settag" style={{ borderColor: "#8a5050", color: "#a86a6a" }}>untrained</span>}</div>
                       <div className="mono tiny dim">{itemStatText(it)}</div>
+                      {sealed && <div className="tiny" style={{ color: "#8a7f5a" }}>dormant — grants nothing until this strap opens</div>}
                       {itemProcs(it).map((pid3) => PROCS[pid3] && (
                         <div key={pid3} className="tiny" style={{ color: PROCS[pid3].color }}>✦{PROCS[pid3].name}: {PROCS[pid3].desc}</div>
                       ))}
                     </>
                   ) : (
-                    <div className="dim tiny">{k === "offhand" && isTwoH(g.eq.weapon) ? "— two-handed grip —" : "— empty —"}</div>
+                    <div className="dim tiny">{sealed ? `— sealed until ${slotReqText(k)} —` : k === "offhand" && isTwoH(g.eq.weapon) ? "— two-handed grip —" : "— empty —"}</div>
                   )}
                 </div>
               );
@@ -4484,6 +4566,22 @@ function App() {
             Sealed Fate Chest — 1× Chaos Pearl + {fmt(gambleCost(260 * costScale(t)))}g
           </button>
           <div className="tiny dim">Guaranteed Legendary+ with a trait · 12% Mythic · 2% zone Eternal.</div>
+
+          <div className="sectionlabel" style={{ marginTop: 12 }}>
+            The Anvil's Ledger
+            {(g.forgeLog || []).length > 0 && (
+              <button className="btn tiny ghost" style={{ float: "right", marginTop: -2 }} onClick={clearForgeLog}>clear</button>
+            )}
+          </div>
+          <div className="forgelog">
+            {(g.forgeLog || []).length === 0 ? (
+              <div className="dim tiny">The anvil is cold. Temper something, weave a trait, or tempt Grey-Whisker — every stroke is recorded here.</div>
+            ) : (
+              (g.forgeLog || []).slice().reverse().map((l) => (
+                <div key={l.id} className={"forgeline " + (l.kind || "sys")}>{l.msg}</div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
@@ -4646,6 +4744,7 @@ function App() {
               <div>Bloodline: {raceInfo.modText}</div>
               <div>Resist: {EL_KEYS.map((ek) => `${ELEMENTS[ek].glyph}${Math.round(playerRes(g, ek) * 100)}%`).join(" · ")}</div>
               <div>Armor: turns {Math.round(mitigation(st.def, g.level, g.race === "terraborn" ? 0.9 : DEF_CAP) * 100)}% of each blow{mitigation(st.def, g.level, g.race === "terraborn" ? 0.9 : DEF_CAP) >= (g.race === "terraborn" ? 0.9 : DEF_CAP) ? " (at the ceiling)" : ` · comfort point ${fmt(defSoftCap(g))} DEF`}</div>
+              <div>Harness: {openSlots(g).length}/{SLOT_KEYS.length} straps open{openSlots(g).length < SLOT_KEYS.length ? ` · next: ${SLOTS[SLOT_KEYS.filter((k) => !slotUnlocked(g, k))[0]].name} at ${slotReqText(SLOT_KEYS.filter((k) => !slotUnlocked(g, k))[0])}` : ""}</div>
               <div>Trained: {weaponsFor(g.cls).map((k) => DAMAGE_CLASSES[k].glyph + DAMAGE_CLASSES[k].name).join(" · ")} │ {armorsFor(g.cls).map((k) => ARMOR_TYPES[k].glyph + ARMOR_TYPES[k].name).join(" · ")}</div>
               {companionCfg(g) && (() => {
                 const cc = companionCfg(g);
@@ -4844,6 +4943,16 @@ const CSS = `
 }
 @keyframes beastbob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 .beastfloats { top: -4px; }
+.forgelog { max-height: 168px; overflow-y: auto; background: #10121a; border: 1px solid #2a2f3d;
+  border-radius: 4px; padding: 7px 9px; display: flex; flex-direction: column; gap: 3px; }
+.forgeline { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; line-height: 1.45;
+  color: ${C.dim}; border-left: 2px solid transparent; padding-left: 6px; }
+.forgeline.lvl { color: ${C.gilt}; border-left-color: ${C.gilt}; }
+.forgeline.melt { color: #a86a6a; border-left-color: #8a5050; }
+.forgeline.loot { color: ${C.jade}; border-left-color: ${C.jade}; }
+.forgeline.sys { color: #8b93a7; }
+.sealedslot { opacity: 0.55; border-style: dashed; }
+.sealtag { font-size: 9px; color: ${C.gilt}; opacity: 0.85; margin-left: auto; letter-spacing: 0.04em; }
 .asctag { position: absolute; top: 4px; right: 8px; color: ${C.violet}; letter-spacing: 0.12em; opacity: 0.85; z-index: 2; }
 .petbar { flex: 1; max-width: 84px; }
 .formchip { font-size: 9px; padding: 1px 7px; flex-shrink: 0; }
