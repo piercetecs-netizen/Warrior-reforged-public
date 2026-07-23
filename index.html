@@ -566,7 +566,10 @@ const eAtk = (lvl) => 4.5 * Math.pow(1.075, lvl);
 const eXp = (lvl) => 7 * Math.pow(1.07, lvl);
 const eGold = (lvl) => 5 * Math.pow(1.08, lvl);
 // kills-per-level rises gently from ~12 to ~37 across the journey
-const xpNeed = (lv) => Math.round((12 + lv * 0.25) * eXp(lv));
+/* pacing: kills-per-level. The middle game (5–55) is where builds form —
+   it earns a steeper climb so realms are LIVED IN, not blurred past; past 55
+   the slope relaxes and marquee kills (below) carry the weight instead. */
+const xpNeed = (lv) => Math.round((12 + 0.55 * Math.min(lv, 55) + 0.12 * Math.max(0, lv - 55)) * eXp(lv));
 // fighting foes far beneath you pays a fraction of the XP
 function xpScale(playerLvl, enemyLvl) {
   const diff = playerLvl - enemyLvl;
@@ -596,7 +599,7 @@ const beastForm = (lv) => { let f = BEAST_FORMS[0]; for (const b of BEAST_FORMS)
    FRONT line (taking the hits) or fall BACK behind you. */
 const COMPANION_CLASSES = {
   beastcaller: { kind: "beast", atkShare: 0.35, hpShare: 0.45, heroAtkMul: 0.75, heroDefMul: 1.0, petDefMul: 0.8 },
-  cleric: { kind: "guardian", atkShare: 0.85, hpShare: 0.55, heroAtkMul: 0.35, heroDefMul: 0.85, petDefMul: 1.1 },
+  cleric: { kind: "guardian", atkShare: 0.78, hpShare: 0.55, heroAtkMul: 0.35, heroDefMul: 0.85, petDefMul: 1.1 },
 };
 const companionCfg = (g) => COMPANION_CLASSES[g.cls] || null;
 const GUARDIAN_FORMS = [
@@ -996,11 +999,34 @@ function makeFoe(g, kind) {
     elRes = kind === "elite" ? 0.45 : 0.2;
     hp *= 1.08; atk *= 1.08;
   }
+  /* war-omens: past level 55 the world sharpens — lesser foes may bear a
+     mutation that changes how they fight and what they're worth. */
+  let mut = null, mutXp = 1, mutGold = 1, mutEss = 0;
+  if (kind !== "boss" && lvl >= 55 && Math.random() < 0.22) {
+    mut = pick(["Frenzied", "Bulwarked", "Voidtouched", "Gilded", "Hollowed"]);
+    if (mut === "Frenzied") { atk *= 1.3; mutXp = 1.25; }
+    else if (mut === "Bulwarked") { hp *= 1.5; mutGold = 1.4; }
+    else if (mut === "Voidtouched") { el = el || pick(EL_KEYS); elRes = 0.6; mutXp = 1.2; }
+    else if (mut === "Gilded") { hp *= 0.7; mutGold = 2; }
+    else if (mut === "Hollowed") { hp *= 1.2; mutEss = 2; }
+    name = mut + " " + name;
+  }
+  /* Throne ascension: the endless zone climbs forever */
+  if (g.zone === ZONES.length - 1 && (g.ascension || 0) > 0) {
+    const am = 1 + 0.08 * g.ascension;
+    hp *= am; atk *= am;
+  }
+  /* boss hunt ranks: each rematch comes back harder */
+  if (kind === "boss" && g.huntRank && g.huntRank[g.zone] > 0) {
+    const hm = 1 + 0.1 * g.huntRank[g.zone];
+    hp *= hm; atk *= hm;
+  }
   return {
     name: el && kind !== "boss" ? ELEMENTS[el].glyph + " " + name : name, lvl,
     hp: Math.round(hp), maxHp: Math.round(hp), atk: Math.round(atk),
     isBoss: kind === "boss", isElite: kind === "elite", inPack: kind === "pack",
     stun: 0, el, elRes, bsT: kind === "boss" ? 6 : 0, bsN: 0, enrage: 1,
+    mut, mutXp, mutGold, mutEss,
   };
 }
 
@@ -1072,6 +1098,7 @@ function newGame(cls, name, race = "human", bg = "farmhand") {
     echoes: 0, rebirths: 0,
     vault: [], runes: {}, pendingUpgrades: [],
     rage: 0, chrono: 0, pet: null, formation: "front",
+    ascension: 0, throneKills: 0, huntRank: ZONES.map(() => 0),
     loadoutIdx: 0, loadouts: [null, null, null],
     loadoutFocus: [null, null, null],
     savedAt: Date.now(),
@@ -1451,8 +1478,11 @@ function rewardFoe(g, f, st) {
   const echoMult = 1 + (g.echoes || 0) * 0.01;
   const setB = setTiers(g).t;
   const setRewardMult = 1 + 0.06 * setB.binding + 0.04 * setB.chime;
-  const xpGain = Math.round(eXp(f.lvl) * rm * (g.restedT > 0 ? (g.bg === "pilgrim" ? 1.35 : 1.25) : 1) * sc * (rmods.xp || 1) * echoMult * setRewardMult * (eqProcs(g).has("sagemind") ? 1.08 : 1) * (g.bg === "scholar" ? 1.1 : 1));
-  const goldGain = Math.round(eGold(f.lvl) * rm * streakBonus * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1.1 : 1) * (g.bg === "noble" ? 1.08 : 1) * (g.bg === "rod" ? 1.05 : 1));
+  const marquee = f.lvl >= 55 ? (f.isBoss ? 1.5 : f.isElite ? 1.35 : 1) : 1;
+  const ascMult = g.zone === ZONES.length - 1 ? 1 + 0.06 * (g.ascension || 0) : 1;
+  const huntXp = f.isBoss ? 1 + 0.05 * ((g.huntRank && g.huntRank[g.zone]) || 0) : 1;
+  const xpGain = Math.round(eXp(f.lvl) * rm * (g.restedT > 0 ? (g.bg === "pilgrim" ? 1.35 : 1.25) : 1) * sc * (rmods.xp || 1) * echoMult * setRewardMult * (eqProcs(g).has("sagemind") ? 1.08 : 1) * (g.bg === "scholar" ? 1.1 : 1) * marquee * ascMult * huntXp * (f.mutXp || 1));
+  const goldGain = Math.round(eGold(f.lvl) * rm * streakBonus * (rmods.gold || 1) * echoMult * setRewardMult * (eqProcs(g).has("greedglint") ? 1.1 : 1) * (g.bg === "noble" ? 1.08 : 1) * (g.bg === "rod" ? 1.05 : 1) * (g.zone === ZONES.length - 1 ? 1 + 0.06 * (g.ascension || 0) : 1) * (f.mutGold || 1));
   g.xp += xpGain; g.gold += goldGain; g.lifetimeKills += 1;
   bumpBounty(g, "kills");
   g.vigor = Math.max(0, g.vigor - 0.35 * (g.bg === "farmhand" ? 0.75 : 1));
@@ -1500,9 +1530,17 @@ function rewardFoe(g, f, st) {
     const zb = ZONES[g.zone];
     const lvlBoost = 1 + clamp((f.lvl - zb.lv[0]) * 0.012, 0.05, 0.65);
     const wildMode = soul.chaos ? "chaos" : "wild";
+    const rank = (g.huntRank && g.huntRank[g.zone]) || 0;
+    if (!g.huntRank) g.huntRank = ZONES.map(() => 0);
+    if (g.huntRank[g.zone] < 10) {
+      g.huntRank = [...g.huntRank];
+      g.huntRank[g.zone] += 1;
+      if (g.huntRank[g.zone] > 1) pushRibbon(g, `HUNT RANK ${g.huntRank[g.zone]}`, C.gilt);
+      if (g.huntRank[g.zone] > 1) pushLog(g, `Hunt Rank ${g.huntRank[g.zone]}: ${f.name.replace(/^[\u4e00-\u9fff] /, "")} will return harder — and richer.`, "boss");
+    }
     applyDrop(g, makeItem(t, { minRarity: 3, boost: lvlBoost * 0.95, favor: soul.favor, wild: wildMode }));
     applyDrop(g, makeItem(t, { minRarity: 2, boost: lvlBoost * 0.9, favor: soul.favor, wild: wildMode }));
-    if (Math.random() < 0.25) {
+    if (Math.random() < 0.25 + 0.03 * rank) {
       const rslot = pickRelicSlot();
       const item = makeItem(t, { slot: rslot, rarity: 4, boost: 1.1 * lvlBoost, set: g.zone, favor: soul.favor, wild: wildMode });
       const ep = item.heat >= 1.38 ? "Awakened" : item.heat >= 1.28 ? "Furious" : item.heat >= 1.15 ? "Roused" : item.heat <= 0.92 ? "Dormant" : "";
@@ -1511,7 +1549,7 @@ function rewardFoe(g, f, st) {
       pushSplash(g, ep === "Awakened" ? "AWAKENED RELIC" : "RELIC CLAIMED", item.name, ep === "Awakened" ? C.violet : C.gilt);
       applyDrop(g, item);
     }
-    if (Math.random() < 0.02) {
+    if (Math.random() < 0.02 + 0.003 * rank) {
       const E = ETERNALS[g.zone];
       const eit = makeItem(t, { slot: E.slot, rarity: 6, name: E.name, boost: 1.15 * lvlBoost, favor: soul.favor, wild: "chaos", proc: E.proc, wtype: E.wtype });
       pushLog(g, `Something impossible falls from ${f.name}: ${E.name}, the Eternal.`, "boss");
@@ -1566,6 +1604,18 @@ function rewardFoe(g, f, st) {
     if (unlocked) pushLog(g, `New skill available to train: ${unlocked.name}.`, "lvl");
   }
 
+  if (f.mutEss) {
+    g.essence = (g.essence || 0) + f.mutEss;
+    pushLog(g, `The Hollowed one leaks ${f.mutEss}精 of raw spirit.`, "loot");
+  }
+  if (g.zone === ZONES.length - 1) {
+    g.throneKills = (g.throneKills || 0) + 1;
+    if (g.throneKills % 25 === 0) {
+      g.ascension = (g.ascension || 0) + 1;
+      pushRibbon(g, `ASCENSION ${g.ascension} — THE THRONE CLIMBS`, C.violet);
+      pushLog(g, `Ascension ${g.ascension}: the Throne's foes sharpen (+8% each), and so do its spoils (+6%).`, "boss");
+    }
+  }
   if (f.isBoss) {
     g.bossPending = false;
     g.bossDown[g.zone] = true;
@@ -2402,6 +2452,9 @@ function migrate(raw) {
   g.rage = clamp(raw.rage || 0, 0, 100);
   g.chrono = 0;
   g.formation = raw.formation === "back" ? "back" : "front";
+  g.ascension = Math.max(0, raw.ascension | 0);
+  g.throneKills = Math.max(0, raw.throneKills | 0);
+  g.huntRank = ZONES.map((_, i) => clamp((Array.isArray(raw.huntRank) ? raw.huntRank[i] : 0) | 0, 0, 10));
   g.pet = raw.pet && typeof raw.pet === "object" ? { hp: Math.max(0, Math.round(raw.pet.hp || 0)), downT: Math.max(0, raw.pet.downT || 0) } : null;
   g.loadoutIdx = clamp(raw.loadoutIdx || 0, 0, 2);
   g.loadoutFocus = [0, 1, 2].map((i) => {
@@ -3557,6 +3610,9 @@ function App() {
 
         {/* battle scene — vector actors, fixed height, nothing shifts */}
         <div className={"scene" + (fighting ? " fighting" : "") + (g.camping ? " camping" : "")}>
+          {(g.zone === ZONES.length - 1 && (g.ascension || 0) > 0) && (
+            <div className="asctag mono tiny">ASC {g.ascension}</div>
+          )}
           <div className="sceneline" />
           <div className={"heroSpot" + (g.dead > 0 ? " fallen" : "") + (lowHp ? " lowfig" : "")}>
             <HeroFig cls={g.cls} camping={g.camping} />
@@ -3815,6 +3871,8 @@ function App() {
                 </div>
               ))}
               <div className="tiny dim" style={{ marginTop: 4 }}>Speed above 1.0 is the chance of an extra basic strike each tick; two-handers trade speed for heavier blows and seal the offhand while gripped. Each class masters certain types for +10% weapon damage — Warrior: sword/greatsword/glaive · Blademaster: sword/saber/dagger (and may wield a second one-hander, striking with both) · Mage: staff/whisk · Taoist: fists/whisk/staff · Beastcaller: saber/glaive/dagger · Monk: fists/staff/whisk · Shadow: dagger/saber · Sentinel: sword/glaive · Ranger: dagger/saber · Berserker: greatsword/glaive/saber · Warlock, Cleric, Necromancer: staff/whisk · Samurai: sword/saber · Druid: staff/fist · Spellblade: sword/saber/staff. Fist weapons are hand-to-hand: two-handed yet fastest of all.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>The long road — pacing &amp; the late game</div>
+              <div className="tiny dim">The middle realms (5–55) climb steeply on purpose — that's where builds are forged, so each realm is lived in rather than blurred past. Beyond 55 the slope eases and MARQUEE kills carry you: Elites are worth +35% XP, bosses +50%. The world sharpens too: past 55, lesser foes may bear a war-omen — <b style={{ color: C.cinnabar }}>Frenzied</b> (harder, +25% XP) · <b style={{ color: C.storm }}>Bulwarked</b> (tougher, +40% gold) · <b style={{ color: C.violet }}>Voidtouched</b> (element-warded, +20% XP) · <b style={{ color: C.gilt }}>Gilded</b> (frail, gold ×2) · <b>Hollowed</b> (leaks 2精). Every boss rematch raises its HUNT RANK (to 10): it returns +10% stronger each rank but pays +5% XP, +3% relic chance, and better Eternal odds. And the Throne of Silence now ASCENDS — every 25 kills there, its foes gain +8% and its spoils +6%, forever. The end is a ladder, not a plateau.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>How skills choose their moment</div>
               <div className="tiny dim">Woven skills no longer fire the instant they're ready — they wait for the moment they matter. Sustain casts on NEED (heals when you or your companion are hurt — Berserkers cling to their wounds far longer, since bloodrage feeds on them); buffs recast only once the old one fades; running afflictions aren't clobbered; shields aren't stacked onto a full ward. DPS respects the target: great nukes hold when a basic strike would finish common prey (Elites and bosses always merit them), and grand AOE waits for a pack — or a boss — rather than one straggler. Nothing ever burns a cooldown into empty air, though shields and mending may be laid between waves. Rage runs its own economy: the Ravager reserves 60+ rage finishers for worthy prey — but at 90+ rage it DUMPS freely, because capped rage is rage wasted. A held skill costs nothing: no cooldown, no rage.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Companions &amp; formation</div>
@@ -4560,6 +4618,7 @@ const CSS = `
 }
 @keyframes beastbob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 .beastfloats { top: -4px; }
+.asctag { position: absolute; top: 4px; right: 8px; color: ${C.violet}; letter-spacing: 0.12em; opacity: 0.85; z-index: 2; }
 .petbar { flex: 1; max-width: 84px; }
 .formchip { font-size: 9px; padding: 1px 7px; flex-shrink: 0; }
 .beastSpot.backline { left: 2px; opacity: 0.85; z-index: 0; }
