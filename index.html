@@ -71,9 +71,20 @@ const FLAGS = { loadouts: false };
    CRIT is a hard ceiling (can't exceed 100% chance); the others are the
    practical points where returns flatten against endgame content. */
 const STAT_CAPS = { crit: 100, def: 400, atk: null, hp: null };
+/* Armor turns a SHARE of every blow rather than subtracting a flat slab.
+   Under the old rule a geared hero's DEF exceeded any foe's attack outright
+   and every strike floored to 1 damage — armor bought immunity, and wards,
+   heals and shields meant nothing. Now reduction = def / (def + threshold),
+   with the threshold climbing by level: armor keeps pace forever, matters
+   more the more you invest, and never reaches invulnerability. */
+const DEF_CAP = 0.85;
+const defThreshold = (lvl) => 14 * Math.pow(1.05, lvl);
+const mitigation = (def, lvl) => Math.min(DEF_CAP, Math.max(0, def) / (Math.max(0, def) + defThreshold(lvl)));
+/* the point past which further DEF gives a quarter value (≈70% reduction) */
+const defSoftCap = (g) => Math.round(2.33 * defThreshold(g.level));
 const capNote = {
   crit: "hard cap 100% — every point above is wasted",
-  def: "softens sharply past ~400 (mitigation flattens)",
+  def: "turns a share of each blow — past your level's comfort point, each further point counts a quarter",
 };
 
 /* the four elements. Cycle of dominance: fire scorches earth, earth grounds
@@ -380,7 +391,7 @@ const CLASSES = {
     name: "Vowkeeper", seal: "誓", color: "#d8c9a0",
     hp: 135, hpL: 25, atk: 9, atkL: 2.2, def: 5, defL: 1.0, crit: 4,
     blurb: "Raises no hand — and needs none.",
-    passive: "Passive: the Vow — you never strike, and no weapon will do it for you. Every blow you suffer erupts back as a shockwave to ALL foes (130% of the harm + 50% ATK), measured on the blow as it ARRIVES: even a strike wholly swallowed by a shield or ward still rings out. Aggression digs its own grave.",
+    passive: "Passive: the Vow — you never strike, and no weapon will do it for you. All aggression offered in a beat is gathered and answered ONCE: a shockwave to every foe worth 75% ATK + 130% of the harm answered. A ward blunts the answer as it blunts the blow — harm swallowed by a shield still rings out, but at 40%. Aggression digs its own grave.",
   },
   chronomancer: {
     name: "Chronomancer", seal: "时", color: "#8fb5c8",
@@ -651,7 +662,12 @@ function fmt(n) {
 
 /* level-driven curves: enemies grow smoothly with their level,
    so zone borders no longer spike */
-const eHp = (lvl) => 30 * Math.pow(1.09, lvl);
+/* Foe vitality. The old curve (30 × 1.09^lvl) fell so far behind geared
+   damage that ordinary foes died in well under one strike until the very
+   late zones — a whole journey of one-shots. This one holds a real fight:
+   roughly 2.5–6 exchanges for a lesser foe, elites and bosses proportionally
+   longer, and it rises more gently so the late game doesn't balloon. */
+const eHp = (lvl) => 210 * Math.pow(1.069, lvl);
 const eAtk = (lvl) => 4.5 * Math.pow(1.075, lvl);
 const eXp = (lvl) => 7 * Math.pow(1.07, lvl);
 const eGold = (lvl) => 5 * Math.pow(1.08, lvl);
@@ -659,7 +675,7 @@ const eGold = (lvl) => 5 * Math.pow(1.08, lvl);
 /* pacing: kills-per-level. The middle game (5–55) is where builds form —
    it earns a steeper climb so realms are LIVED IN, not blurred past; past 55
    the slope relaxes and marquee kills (below) carry the weight instead. */
-const xpNeed = (lv) => Math.round((12 + 0.55 * Math.min(lv, 55) + 0.12 * Math.max(0, lv - 55)) * eXp(lv));
+const xpNeed = (lv) => Math.round((12 + 0.38 * Math.min(lv, 55) + 0.12 * Math.max(0, lv - 55)) * eXp(lv));
 // fighting foes far beneath you pays a fraction of the XP
 function xpScale(playerLvl, enemyLvl) {
   const diff = playerLvl - enemyLvl;
@@ -1281,7 +1297,7 @@ function statWeights(g) {
 }
 // value of a stat point at the current total, respecting soft/hard caps
 function cappedGain(g, k, fromVal, addVal) {
-  const cap = STAT_CAPS[k];
+  const cap = k === "def" ? defSoftCap(g) : STAT_CAPS[k];
   if (cap == null) return addVal;
   if (k === "crit") { const room = Math.max(0, cap - fromVal); return Math.min(addVal, room); }
   // def: linear to cap, then 25% effectiveness beyond
@@ -2350,13 +2366,24 @@ function step(prev) {
      strike as it arrives — after armor and elemental resistance, but BEFORE
      any shield or ward swallows it — so a hit absorbed to nothing still rings
      out. Aggression is punished for being offered, not for landing. */
-  const vowRetaliate = (incoming) => {
+  let vowHarm = 0;
+  /* The Vow gathers ALL the aggression offered this beat and answers it once,
+     rather than once per striker — otherwise a pack of six punished itself
+     thirty-six times over. Harm swallowed by a ward still rings out, but at
+     40%: shelter is shelter, not free force. */
+  const vowTake = (incoming, absorbed) => {
     if (g.cls !== "vowkeeper" || !(incoming > 0)) return;
+    const warded = Math.min(absorbed || 0, incoming);
+    vowHarm += (incoming - warded) + warded * 0.4;
+  };
+  const vowAnswer = () => {
+    if (g.cls !== "vowkeeper" || vowHarm <= 0 || !foes.length) return;
     const mul = b.vowT > 0 ? 1.6 : 1;
-    const shock = Math.max(1, Math.round((incoming * 1.3 + st.atk * 0.5) * mul));
-    let hits = 0;
-    for (const f2 of foes) if (f2.hp > 0) { f2.hp -= shock; hits++; }
-    if (hits) fx.push({ id: floatSeq++, text: "誓 −" + fmt(shock * hits), crit: b.vowT > 0, side: "enemy" });
+    const shock = Math.max(1, Math.round((st.atk * 0.75 + vowHarm * 1.3) * mul));
+    let total = 0;
+    for (const f2 of foes) if (f2.hp > 0) { f2.hp -= shock; total += shock; }
+    vowHarm = 0;
+    if (total) fx.push({ id: floatSeq++, text: "誓 −" + fmt(total), crit: b.vowT > 0, side: "enemy" });
   };
   if (g.splash || g.lvlfx) { g.enemies = foes; return g; }
   for (let i = 0; i < foes.length; i++) {
@@ -2376,8 +2403,10 @@ function step(prev) {
             fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息 −" + fmt(bd2), crit: true, side: "beast" });
             if (g.pet.hp <= 0) { g.pet.hp = 0; g.pet.downT = 10; pushRibbon(g, petCfg.kind === "guardian" ? "THE GUARDIAN FALLS" : "YOUR BEAST FALLS", C.cinnabar); pushLog(g, "Your companion is struck down — it will return, in time.", "boss"); }
           } else {
-            vowRetaliate(bd2);
-            if (b.shield > 0) { const ab = Math.min(b.shield, bd2); b.shield -= ab; bd2 -= ab; }
+            const bIn = bd2;
+            let bAbs = 0;
+            if (b.shield > 0) { bAbs = Math.min(b.shield, bd2); b.shield -= bAbs; bd2 -= bAbs; }
+            vowTake(bIn, bAbs);
             if (bd2 > 0) { g.hp -= bd2; g.hurtLastTick = true; }
             fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息 −" + fmt(Math.max(0, bd2)), crit: true, side: "player" });
           }
@@ -2392,7 +2421,7 @@ function step(prev) {
     const slowed = (b.slowT > 0 ? 0.7 : 1) * (g.graveChill > 0 ? 0.92 : 1);
     if (petFront) {
       const petDef = st.def * petCfg.petDefMul;
-      let edmgP = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) - petDef * 0.6));
+      let edmgP = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(petDef, f.lvl))));
       if (f.el) edmgP = Math.max(1, Math.round(edmgP * (1 - playerRes(g, f.el))));
       g.pet.hp -= edmgP;
       fx.push({ id: floatSeq++, text: "−" + fmt(edmgP), crit: false, side: "beast" });
@@ -2404,15 +2433,17 @@ function step(prev) {
       }
       continue;
     }
-    let edmg = Math.max(1, Math.round((f.atk * slowed * rnd(0.85, 1.15) - st.def * heroDefEff * 0.6) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.88 : 1)));
+    let edmg = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(st.def * heroDefEff, f.lvl)) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.88 : 1)));
     if (f.el) edmg = Math.max(1, Math.round(edmg * (1 - playerRes(g, f.el))));
-    vowRetaliate(edmg);
+    const incoming = edmg;
+    let absorbed = 0;
     if (b.shield > 0) {
-      const absorbed = Math.min(b.shield, edmg);
+      absorbed = Math.min(b.shield, edmg);
       b.shield -= absorbed;
       edmg -= absorbed;
       if (edmg <= 0) fx.push({ id: floatSeq++, text: "⛨ warded", crit: false, side: "player" });
     }
+    vowTake(incoming, absorbed);
     if (edmg > 0) {
       g.hp -= edmg;
       g.hurtLastTick = true;
@@ -2454,10 +2485,12 @@ function step(prev) {
         ? `${f.name} strikes you down. Your streak breaks; you lose ${fmt(lost)} gold.`
         : `${f.name} strikes you down. Your streak breaks — but a deserter keeps their purse.`, "death");
       pushSplash(g, "STRUCK DOWN", "the fire calls you back", C.cinnabar);
+      vowAnswer();
       return g;
     }
   }
 
+  vowAnswer();
   g.enemies = foes;
   return g;
 }
@@ -4032,6 +4065,7 @@ function App() {
               <div className="guidetitle" style={{ marginTop: 8 }}>Steel, cloth and plate — what your school carries</div>
               <div className="tiny dim">Every weapon wounds in one of three ways — <b style={{ color: DAMAGE_CLASSES.slash.color }}>刃 Slash</b> (sword, saber, greatsword), <b style={{ color: DAMAGE_CLASSES.pierce.color }}>刺 Pierce</b> (dagger, glaive), <b style={{ color: DAMAGE_CLASSES.blunt.color }}>捶 Blunt</b> (staff, whisk, fists) — and every school trains in some and refuses others. A Cleric keeps to staff and whisk and will not carry an edge; a Samurai answers only with the cut; a Ravager takes whatever is nearest. Training is permission; mastery (the green tag) is excellence atop it.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Worn armor has a WEIGHT, and weight decides the shape of its virtues: <b style={{ color: ARMOR_TYPES.robe.color }}>袍 Robe</b> spends shelter for power (−DEF −HP, +ATK +CRIT) · <b style={{ color: ARMOR_TYPES.light.color }}>轻 Light</b> stays swift and keen · <b style={{ color: ARMOR_TYPES.medium.color }}>中 Medium</b> balances · <b style={{ color: ARMOR_TYPES.heavy.color }}>重 Heavy</b> hoards shelter at the cost of edge. Totals stay close across the four — the trade is real, not a ladder. Weight applies to armor, helm, pauldrons, greaves, bracers, gloves and boots; trinkets, cloaks, belts and offhands are unweighted and open to all.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Armor turns a SHARE of every blow rather than shaving off a flat slab: reduction climbs as <b>DEF ÷ (DEF + a threshold that rises with the foe's level)</b>, capped at 85%. Armor therefore keeps pace with the whole journey and rewards every point invested, but never buys immunity — a heavier foe, an elite, a boss, and above all a boss's BREATH (which armor does not turn at all — only elemental resistance blunts it) all land proportionally harder. Your current figure sits on your stat sheet.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Gear you were never trained for is tagged <b style={{ color: "#a86a6a" }}>untrained</b>: it will never be worn or auto-equipped, and waits in your pack or vault (sell it, or keep it for another life). The world knows this — most of what drops suits your school, but not all of it. Your training is listed on your stat sheet.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The long road — pacing &amp; the late game</div>
               <div className="tiny dim">The middle realms (5–55) climb steeply on purpose — that's where builds are forged, so each realm is lived in rather than blurred past. Beyond 55 the slope eases and MARQUEE kills carry you: Elites are worth +35% XP, bosses +50%. The world sharpens too: past 55, lesser foes may bear a war-omen — <b style={{ color: C.cinnabar }}>Frenzied</b> (harder, +25% XP) · <b style={{ color: C.storm }}>Bulwarked</b> (tougher, +40% gold) · <b style={{ color: C.violet }}>Voidtouched</b> (element-warded, +20% XP) · <b style={{ color: C.gilt }}>Gilded</b> (frail, gold ×2) · <b>Hollowed</b> (leaks 2精). Every boss rematch raises its HUNT RANK (to 10): it returns +10% stronger each rank but pays +5% XP, +3% relic chance, and better Eternal odds. And the Throne of Silence now ASCENDS — every 25 kills there, its foes gain +8% and its spoils +6%, forever. The end is a ladder, not a plateau.</div>
@@ -4585,6 +4619,7 @@ function App() {
               <div>{cls.passive}</div>
               <div>Bloodline: {raceInfo.modText}</div>
               <div>Resist: {EL_KEYS.map((ek) => `${ELEMENTS[ek].glyph}${Math.round(playerRes(g, ek) * 100)}%`).join(" · ")}</div>
+              <div>Armor: turns {Math.round(mitigation(st.def, g.level) * 100)}% of each blow{mitigation(st.def, g.level) >= DEF_CAP ? " (at the ceiling)" : ` · comfort point ${fmt(defSoftCap(g))} DEF`}</div>
               <div>Trained: {weaponsFor(g.cls).map((k) => DAMAGE_CLASSES[k].glyph + DAMAGE_CLASSES[k].name).join(" · ")} │ {armorsFor(g.cls).map((k) => ARMOR_TYPES[k].glyph + ARMOR_TYPES[k].name).join(" · ")}</div>
               {companionCfg(g) && (() => {
                 const cc = companionCfg(g);
