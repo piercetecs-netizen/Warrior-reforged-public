@@ -343,7 +343,7 @@ const CLASSES = {
     name: "Berserker", seal: "狂", color: "#b5402f",
     hp: 118, hpL: 22, atk: 13, atkL: 3.1, def: 2, defL: 0.4, crit: 8,
     blurb: "Pain is only fuel.",
-    passive: "Passive: bloodrage — the lower your health, up to +40% attack (fiercest near death).",
+    passive: "Passive: bloodrage — the lower your health, the harder you hit, up to +65% attack at death's door. You never guard: armor turns only three-quarters as much for you, and each beat in battle you spend 0.4% of your max HP to stoke the fury (never bleeding yourself below 30% — foes must do the rest).",
   },
   warlock: {
     name: "Warlock", seal: "魔", color: "#9a5fc8",
@@ -1920,7 +1920,7 @@ function step(prev) {
   const critCh = st.crit + b.critAdd;
   const bossFight = foes.some((f) => f.isBoss);
   const fullSets = setTiers(g).t.full;
-  const rage = g.cls === "berserker" ? 1 + 0.4 * (1 - g.hp / Math.max(1, st.maxHp)) : 1;
+  const rage = g.cls === "berserker" ? 1 + 0.65 * (1 - g.hp / Math.max(1, st.maxHp)) : 1;
   const soloShot = g.cls === "ranger" && foes.length === 1 ? 1.2 : 1;
   const baseAtk = st.atk * b.atkMult * (tired && g.race !== "stoneborn" ? 0.75 : 1) * (bossFight && g.cls === "warrior" ? 1.15 : 1) * (bossFight ? 1 + 0.12 * fullSets + (g.race === "sunborn" ? 0.12 : 0) : 1) * (g.cls === "sentinel" && b.shield > 0 ? 1.1 : 1) * rage * soloShot;
 
@@ -2243,6 +2243,14 @@ function step(prev) {
   if (g.cls === "ravager" && foes.length) g.rage = Math.min(100, (g.rage || 0) + 2);
   if (g.cls === "ravager" && !foes.length) g.rage = Math.max(0, (g.rage || 0) - 2);
   if (g.cls === "chronomancer") g.chrono = ((g.chrono || 0) + 1) % 4;
+  /* Blood Price — a Berserker was never going to be brought low by ordinary
+     foes: their pool is deep and their armor turns most of a blow. So they
+     open their own veins to reach the fury. Self-bleeding stops at 30%;
+     enemies must do the rest, which is exactly where the class lives. */
+  if (g.cls === "berserker" && foes.length && g.dead === 0 && !g.camping) {
+    const floorHp = st.maxHp * 0.3;
+    if (g.hp > floorHp) g.hp = Math.max(floorHp, g.hp - Math.max(1, Math.round(st.maxHp * 0.004)));
+  }
   // Spellblade arcane edge: every 3rd strike detonates
   if (g.cls === "spellblade" && foes[0]) {
     g.arcaneCount = (g.arcaneCount || 0) + 1;
@@ -2362,6 +2370,8 @@ function step(prev) {
 
   /* ---- enemy turn: every living foe strikes ---- */
   const heroDefEff = petCfg ? petCfg.heroDefMul : 1;
+  /* a Berserker does not guard — armor turns only three-quarters as much */
+  const guardEff = g.cls === "berserker" ? 0.75 : 1;
   /* The Vow answers the BLOW, not the wound. Retaliation is measured on the
      strike as it arrives — after armor and elemental resistance, but BEFORE
      any shield or ward swallows it — so a hit absorbed to nothing still rings
@@ -2433,7 +2443,7 @@ function step(prev) {
       }
       continue;
     }
-    let edmg = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(st.def * heroDefEff, f.lvl)) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.88 : 1)));
+    let edmg = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(st.def * heroDefEff, f.lvl) * guardEff) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.88 : 1)));
     if (f.el) edmg = Math.max(1, Math.round(edmg * (1 - playerRes(g, f.el))));
     const incoming = edmg;
     let absorbed = 0;
@@ -3710,7 +3720,7 @@ function App() {
   const gambleCost = (x) => Math.round(x * (g.bg === "merchant" ? 0.88 : 1));
   const forgeGold = craftGold(60 * costScale(t));
   const vigorColor = g.vigor >= 60 ? C.jade : g.vigor >= 25 ? C.gilt : C.cinnabar;
-  const lowHp = g.dead === 0 && g.hp < st.maxHp * 0.25;
+  const lowHp = g.dead === 0 && g.hp < st.maxHp * (g.cls === "berserker" ? 0.18 : 0.25);
   const front = g.enemies && g.enemies[0];
   const others = g.enemies ? g.enemies.slice(1) : [];
   const zoneTrivial = g.level > z.lv[1] + 4;
@@ -4831,7 +4841,8 @@ const CSS = `
 .meterbar { flex: 1; }
 .meterval { width: 86px; font-size: 10px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* low-health alarm: red pulse under 25% max HP */
+/* low-health alarm: red pulse under 25% max HP (a Berserker lives near
+   this line by design — their threshold sits lower, see lowHp below) */
 @keyframes lowpulse { 0%,100% { box-shadow: 0 0 2px rgba(200,69,44,0.35); } 50% { box-shadow: 0 0 12px rgba(200,69,44,0.95); } }
 .lowhp .bar { animation: lowpulse 0.8s ease-in-out infinite; }
 @keyframes lowblink { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
