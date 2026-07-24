@@ -1834,7 +1834,7 @@ function rewardFoe(g, f, st) {
       const odds = f.isBoss ? 1 : f.isElite ? 0.45 : 0.35;
       if (Math.random() < odds) {
         const mm = minionMaxOf(g, st);
-        g.minions = [...g.minions, { hp: mm, maxHp: mm, name: f.name.replace(/^[\u4e00-\u9fff]+ /, "") }];
+        g.minions = [...g.minions, { hp: mm, maxHp: mm, name: f.name.charCodeAt(0) > 0x2000 && f.name.includes(" ") ? f.name.slice(f.name.indexOf(" ") + 1) : f.name }];
         pushLog(g, `${f.name} rises again — bound to your will (${g.minions.length}/${MINION_CAP}).`, "lvl");
         if (g.minions.length === MINION_CAP) pushRibbon(g, "THE PACK IS FULL", "#8a7fb5");
       }
@@ -2059,7 +2059,7 @@ function step(prev) {
     for (const m of g.minions) {
       m.maxHp = mCap;
       m.hp = Math.min(m.hp, mCap);
-      if (foes.length) m.hp -= Math.max(1, Math.round(mCap * MINION_ROT));
+      if ((g.enemies || []).length) m.hp -= Math.max(1, Math.round(mCap * MINION_ROT)); // g.enemies: foes is not bound until far below
     }
     const fell = g.minions.filter((m) => m.hp <= 0).length;
     if (fell) {
