@@ -438,7 +438,7 @@ const CLASSES = {
     name: "Necromancer", seal: "髅", color: "#8a7fb5",
     hp: 88, hpL: 16, atk: 12, atkL: 2.9, def: 3, defL: 0.5, crit: 9,
     blurb: "Death is a beginning, properly directed.",
-    passive: "Passive: grave chill — every kill weakens surviving foes' attack by 8% for a time.",
+    passive: "Passive: RAISE THE DEAD — 35% of the time a slain foe rises to serve you (45% for elites, always for bosses), up to THREE at once. Each thrall strikes for 18% of your attack, but risen flesh rots: they lose 1.5% of their body each beat and crumble. Your own hand softens to 65% to feed them, so a lone necromancer is weak and a full pack is terrible. Grave chill still weakens survivors by 8%.",
   },
   spellblade: {
     name: "Spellblade", seal: "咒", color: "#5fc8be",
@@ -621,7 +621,7 @@ const SKILLS = [
   { id: "hurricane", cls: "druid", name: "Hurricane", lv: 55, cd: 16, tt: 600, desc: "Strike every foe for 360%; chill them 5s." },
   { id: "avatar", cls: "druid", name: "Avatar of the Wild", lv: 75, cd: 25, tt: 900, desc: "Strike every foe for 950% attack." },
   { id: "boneshard", cls: "necromancer", name: "Bone Shard", lv: 3, cd: 6, tt: 45, desc: "Strike the front foe for 260% attack." },
-  { id: "graspdead", cls: "necromancer", name: "Grasp of the Dead", lv: 8, cd: 12, tt: 90, desc: "All foes −30% attack for 5s." },
+  { id: "lifelink", cls: "necromancer", name: "Life-Link", lv: 8, cd: 0, tt: 90, desc: "STANCE — no cooldown; it works whenever it is WOVEN and stops the moment it is unwoven. Your thralls share your fate: 35% of every blow you suffer is spread across the pack, your mending flows to them, and each bears +25% body. When one crumbles the broken link burns you for 3% max HP." },
   { id: "plaguetouch", cls: "necromancer", name: "Plague Touch", lv: 15, cd: 9, tt: 150, desc: "Infect the front foe: 110% attack per second, 4s." },
   { id: "soulrend", cls: "necromancer", name: "Soul Rend", lv: 25, cd: 10, tt: 240, desc: "340% attack and restore 10% max HP." },
   { id: "bonestorm", cls: "necromancer", name: "Bone Storm", lv: 35, cd: 13, tt: 360, desc: "Strike every foe for 350% attack." },
@@ -785,6 +785,19 @@ const companionForm = (g) => {
   for (const b of GUARDIAN_FORMS) if (g.level >= b.lv) f = b;
   return f;
 };
+/* ---- the necromancer's pack ----
+   Thralls are raised from the slain, up to three. They strike for a share of
+   your attack, rot steadily, and can hold the front line. Life-Link, while
+   woven, binds their fate to yours in both directions. */
+const MINION_CAP = 3;
+const MINION_ATK_SHARE = 0.18;
+const MINION_HP_SHARE = 0.2;
+const MINION_ROT = 0.015;
+const NECRO_HERO_MUL = 0.65;
+const isPackClass = (g) => g.cls === "necromancer";
+const linkOn = (g) => isPackClass(g) && (g.skillsOn || []).includes("lifelink") && (g.trained || []).includes("lifelink");
+const minionMaxOf = (g, st) => Math.max(15, Math.round(st.maxHp * MINION_HP_SHARE * (linkOn(g) ? 1.25 : 1)));
+const livingMinions = (g) => (g.minions || []).filter((m) => m.hp > 0);
 const petMaxOf = (g, st) => {
   const c = companionCfg(g);
   return c ? Math.max(20, Math.round(st.maxHp * c.hpShare)) : 0;
@@ -1396,7 +1409,7 @@ function newGame(cls, name, race = "human", bg = "farmhand") {
     bounty: null, bountyCd: 0,
     echoes: 0, rebirths: 0,
     vault: [], runes: {}, pendingUpgrades: [],
-    rage: 0, chrono: 0, pet: null, formation: "front", openSeen: ["weapon", "armor"], forgeLog: [],
+    rage: 0, chrono: 0, pet: null, minions: [], formation: "front", openSeen: ["weapon", "armor"], forgeLog: [],
     ascension: 0, throneKills: 0, huntRank: ZONES.map(() => 0),
     loadoutIdx: 0, loadouts: [null, null, null],
     loadoutFocus: [null, null, null],
@@ -1814,7 +1827,19 @@ function rewardFoe(g, f, st) {
     g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.04));
     for (const ck of Object.keys(g.cds)) g.cds[ck] = Math.max(0, g.cds[ck] - 0.5);
   }
-  if (g.cls === "necromancer") g.graveChill = 3;
+  if (g.cls === "necromancer") {
+    g.graveChill = 3;
+    if (!Array.isArray(g.minions)) g.minions = [];
+    if (g.minions.length < MINION_CAP) {
+      const odds = f.isBoss ? 1 : f.isElite ? 0.45 : 0.35;
+      if (Math.random() < odds) {
+        const mm = minionMaxOf(g, st);
+        g.minions = [...g.minions, { hp: mm, maxHp: mm, name: f.name.replace(/^[\u4e00-\u9fff]+ /, "") }];
+        pushLog(g, `${f.name} rises again — bound to your will (${g.minions.length}/${MINION_CAP}).`, "lvl");
+        if (g.minions.length === MINION_CAP) pushRibbon(g, "THE PACK IS FULL", "#8a7fb5");
+      }
+    }
+  }
   if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 6);
   const kprocs = eqProcs(g);
   if (kprocs.has("lifedrink")) g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * procPower(g, "lifedrink")));
@@ -1963,7 +1988,7 @@ const TACT = {
   critBuffs: new Set(["arcane", "arcanesurge", "bushido", "deathpact", "deathspoem", "hawkeye", "ioncharge", "momentum", "nightembrace", "soulburn"]),
   vowBuffs: new Set(["vowward"]),
   shields: new Set(["aegis", "barkskin", "bearhide", "blessing", "bulwark2", "camostep", "ironbody", "ironskin", "manaward", "parryflow", "parrystance", "resurrection", "sanctuary", "sanctum", "smokeveil", "staticveil", "stillmind", "unbreakable", "ward"]),
-  debuffs: new Set(["challenge", "curse", "graspdead", "patience", "warcry2"]),
+  debuffs: new Set(["challenge", "curse", "patience", "warcry2"]),
   dots: new Set(["bleedingedge", "envenom", "flamestrike", "hex", "plaguetouch", "serpentarrow", "serpentvenom", "soulflame"]),
   lateHeals: new Set(["graceful", "regrowth", "reversal"]),
   bigHeals: new Set(["laststand", "painfeast", "resurrection"]),
@@ -2025,6 +2050,27 @@ function step(prev) {
       }
     }
   } else g.pet = null;
+  /* ---- pack lifecycle: risen flesh rots, and what rots crumbles ---- */
+  const packOn = isPackClass(g);
+  const mCap = packOn ? minionMaxOf(g, st) : 0;
+  const linked = packOn && linkOn(g);
+  if (packOn) {
+    if (!Array.isArray(g.minions)) g.minions = [];
+    for (const m of g.minions) {
+      m.maxHp = mCap;
+      m.hp = Math.min(m.hp, mCap);
+      if (foes.length) m.hp -= Math.max(1, Math.round(mCap * MINION_ROT));
+    }
+    const fell = g.minions.filter((m) => m.hp <= 0).length;
+    if (fell) {
+      g.minions = g.minions.filter((m) => m.hp > 0);
+      if (linked) {
+        const burn = Math.max(1, Math.round(st.maxHp * 0.03 * fell));
+        g.hp = Math.max(1, g.hp - burn);
+        fx.push({ id: floatSeq++, text: "鎖 −" + fmt(burn), crit: false, side: "player" });
+      }
+    }
+  } else if (g.minions && g.minions.length) g.minions = [];
 
   /* ---- camp: rest, sleep, train ---- */
   if (g.camping) {
@@ -2111,6 +2157,7 @@ function step(prev) {
   /* conditional heals fire when YOU need mending — or your companion does */
   const needsHealing = (frac) => {
     if (g.hp < st.maxHp * frac) return true;
+    if (linkOn(g)) { const mm = minionMaxOf(g, st); if (livingMinions(g).some((m) => m.hp < mm * frac)) return true; }
     if (petCfg && g.pet && g.pet.hp > 0 && g.pet.hp < petMaxOf(g, st) * frac) return true;
     return false;
   };
@@ -2118,6 +2165,12 @@ function step(prev) {
     const amt = Math.round(st.maxHp * frac * healMul);
     g.hp = Math.min(st.maxHp, g.hp + amt);
     fx.push({ id: floatSeq++, text: "+" + fmt(amt), crit: false, side: "player", heal: true });
+    if (linked) {
+      const alive = livingMinions(g);
+      const mm = minionMaxOf(g, st);
+      for (const m of alive) m.hp = Math.min(mm, m.hp + Math.round(mm * frac * healMul));
+      if (alive.length) fx.push({ id: floatSeq++, text: "鎖 +" + fmt(Math.round(mm * frac * healMul)), crit: false, side: "beast", heal: true });
+    }
     if (petCfg && g.pet && g.pet.hp > 0) {
       const pm2 = petMaxOf(g, st);
       const pAmt = Math.round(pm2 * frac * healMul);
@@ -2181,6 +2234,7 @@ function step(prev) {
   for (const sid of g.skillsOn) {
     const sk = SKILLS.find((s) => s.id === sid);
     if (!sk || !g.trained.includes(sid)) continue;
+    if (sid === "lifelink") continue; // a stance: its power is simply being woven
     if (g.cls === "ravager") {
       if ((g.rage || 0) < sk.cd * 4) continue;
     } else if ((g.cds[sid] || 0) > 0) continue;
@@ -2362,7 +2416,7 @@ function step(prev) {
       case "hurricane": dealAllE(3.6, "Hurricane"); b.slowT = 5; break;
       case "avatar": dealAllE(9.5, "Avatar"); break;
       case "boneshard": dealFrontE(2.6, "Bone"); break;
-      case "graspdead": b.slowT = 5; pushLog(g, "Dead hands claw at their feet.", "buff"); break;
+      case "lifelink": break; // a stance: never cast — it lives in the weave
       case "plaguetouch": b.dot = Math.round(st.atk * 1.1); b.dotT = 4; pushLog(g, "Plague takes root.", "buff"); break;
       case "soulrend": dealFrontE(3.4, "Rend"); heal(0.1); break;
       case "bonestorm": dealAllE(3.5, "Bonestorm"); break;
@@ -2468,7 +2522,7 @@ function step(prev) {
     const mMul = wtM.dmg * (masteryOf(g, wMain) ? 1.1 : g.race === "human" ? 1.08 : 1);
     const heroMul = petCfg
       ? (b.communeT > 0 ? petCfg.heroAtkMul + petCfg.atkShare * 0.8 : petCfg.heroAtkMul)
-      : 1;
+      : packOn ? NECRO_HERO_MUL : 1;
     if (g.cls !== "vowkeeper") {
       dealFront(heroMul * mMul);
       if (spdEff > 1 && Math.random() < spdEff - 1) dealFront(0.8 * heroMul * mMul);
@@ -2479,6 +2533,18 @@ function step(prev) {
       if (off && off.wtype && WEAPON_TYPES[off.wtype] && WEAPON_TYPES[off.wtype].hands === 1) {
         const oMul = WEAPON_TYPES[off.wtype].dmg * (masteryOf(g, off) ? 1.1 : 1);
         dealFront(0.45 * oMul, "Off");
+      }
+    }
+    if (packOn && foes[0]) {
+      const alive = livingMinions(g);
+      if (alive.length) {
+        let tot = 0;
+        for (let mi = 0; mi < alive.length; mi++) {
+          const md = Math.max(1, Math.round(st.atk * MINION_ATK_SHARE * b.atkMult * gapMult(g.level, foes[0].lvl) * rnd(0.85, 1.15)));
+          foes[0].hp -= md;
+          tot += md;
+        }
+        fx.push({ id: floatSeq++, text: `髅×${alive.length} −` + fmt(tot), crit: false, side: "beast" });
       }
     }
     if (petCfg && g.pet && g.pet.hp > 0 && foes[0]) {
@@ -2597,6 +2663,7 @@ function step(prev) {
     const f = foes[i];
     if (f.stun > 0) { f.stun -= f.isBoss ? 2 : 1; continue; }
     const petFront = petCfg && g.pet && g.pet.hp > 0 && g.formation !== "back";
+    const packFront = packOn && livingMinions(g).length > 0 && g.formation !== "back";
     if (f.isBoss) {
       f.bsT = (f.bsT || 6) - dt;
       if (f.bsT <= 0) {
@@ -2626,6 +2693,17 @@ function step(prev) {
       }
     }
     const slowed = (b.slowT > 0 ? 1 - (b.slowAmt || 0.3) : 1) * (g.graveChill > 0 ? 0.92 : 1);
+    if (packFront) {
+      /* the nearest thrall meets the blow in your place */
+      const alive = livingMinions(g);
+      const tgt = alive[0];
+      let dmgM = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(st.def * 0.75, f.lvl))));
+      if (f.el) dmgM = Math.max(1, Math.round(dmgM * (1 - playerRes(g, f.el))));
+      tgt.hp -= dmgM;
+      fx.push({ id: floatSeq++, text: "髅 −" + fmt(dmgM), crit: false, side: "beast" });
+      if (tgt.hp <= 0) pushLog(g, "A thrall collapses back into loose bones.", "sys");
+      continue;
+    }
     if (petFront) {
       const petDef = st.def * petCfg.petDefMul;
       let edmgP = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(petDef, f.lvl))));
@@ -2642,6 +2720,18 @@ function step(prev) {
     }
     let edmg = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(st.def * heroDefEff, f.lvl, g.race === "terraborn" ? 0.9 : DEF_CAP) * guardEff) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.86 : 1)));
     if (f.el) edmg = Math.max(1, Math.round(edmg * (1 - playerRes(g, f.el))));
+    if (linked) {
+      const alive = livingMinions(g);
+      if (alive.length) {
+        const share = Math.round(edmg * 0.35);
+        if (share > 0) {
+          const each = Math.max(1, Math.round(share / alive.length));
+          for (const m of alive) m.hp -= each;
+          edmg = Math.max(1, edmg - share);
+          fx.push({ id: floatSeq++, text: "鎖 −" + fmt(share), crit: false, side: "beast" });
+        }
+      }
+    }
     const incoming = edmg;
     let absorbed = 0;
     if (b.shield > 0) {
@@ -2850,6 +2940,9 @@ function migrate(raw) {
   g.formation = raw.formation === "back" ? "back" : "front";
   g.openSeen = Array.isArray(raw.openSeen) ? raw.openSeen : openSlots(g);
   g.forgeLog = Array.isArray(raw.forgeLog) ? raw.forgeLog.slice(-80) : [];
+  g.minions = Array.isArray(raw.minions)
+    ? raw.minions.slice(0, MINION_CAP).map((m) => ({ hp: Math.max(1, Math.round(m.hp || 1)), maxHp: Math.max(1, Math.round(m.maxHp || 1)), name: String(m.name || "Thrall") }))
+    : [];
   g.ascension = Math.max(0, raw.ascension | 0);
   g.throneKills = Math.max(0, raw.throneKills | 0);
   g.huntRank = ZONES.map((_, i) => clamp((Array.isArray(raw.huntRank) ? raw.huntRank[i] : 0) | 0, 0, 10));
@@ -4136,6 +4229,38 @@ function App() {
           </div>
         </div>
 
+        {isPackClass(g) && (() => {
+          const mm = minionMaxOf(g, st);
+          const pack = g.minions || [];
+          const link = linkOn(g);
+          const col = "#8a7fb5";
+          return (
+            <div className="beastrow">
+              <span className="beastglyph" style={{ color: col, textShadow: `0 0 8px ${col}88` }}>髅</span>
+              <span className="mono tiny" style={{ color: col }}>
+                Pack {pack.length}/{MINION_CAP}{link ? " · 鎖 linked" : ""}
+              </span>
+              <button className="chip formchip" onClick={toggleFormation}>
+                {g.formation === "back" ? "⇠ back line" : "front line ⇢"}
+              </button>
+              <div className="petstats mono tiny">
+                {pack.length === 0 ? (
+                  <span className="dim">no thralls — slay to raise them</span>
+                ) : (
+                  pack.map((m, i) => (
+                    <div key={i} style={{ flex: 1, minWidth: 22 }}><Bar cur={Math.max(0, m.hp)} max={mm} color={col} height={4} /></div>
+                  ))
+                )}
+                {pack.length > 0 && <span className="dim">ATK {fmt(Math.round(st.atk * MINION_ATK_SHARE))} ea</span>}
+              </div>
+              <div className="floatzone beastfloats">
+                {(g.fx || []).filter((f) => f.side === "beast").map((f) => (
+                  <span key={f.id} className={"float beasthit" + (f.heal ? " healf" : "")}>{f.text}</span>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
         {companionCfg(g) && (() => {
           const ccfg = companionCfg(g);
           const cform = companionForm(g);
@@ -4321,6 +4446,9 @@ function App() {
               <div className="tiny dim">The middle realms (5–55) climb steeply on purpose — that's where builds are forged, so each realm is lived in rather than blurred past. Beyond 55 the slope eases and MARQUEE kills carry you: Elites are worth +35% XP, bosses +50%. The world sharpens too: past 55, lesser foes may bear a war-omen — <b style={{ color: C.cinnabar }}>Frenzied</b> (harder, +25% XP) · <b style={{ color: C.storm }}>Bulwarked</b> (tougher, +40% gold) · <b style={{ color: C.violet }}>Voidtouched</b> (element-warded, +20% XP) · <b style={{ color: C.gilt }}>Gilded</b> (frail, gold ×2) · <b>Hollowed</b> (leaks 2精). Every boss rematch raises its HUNT RANK (to 10): it returns +10% stronger each rank but pays +5% XP, +3% relic chance, and better Eternal odds. And the Throne of Silence now ASCENDS — every 25 kills there, its foes gain +8% and its spoils +6%, forever. The end is a ladder, not a plateau.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>How skills choose their moment</div>
               <div className="tiny dim">Woven skills no longer fire the instant they're ready — they wait for the moment they matter. Sustain casts on NEED (heals when you or your companion are hurt — Berserkers cling to their wounds far longer, since bloodrage feeds on them); buffs recast only once the old one fades; running afflictions aren't clobbered; shields aren't stacked onto a full ward. DPS respects the target: great nukes hold when a basic strike would finish common prey (Elites and bosses always merit them), and grand AOE waits for a pack — or a boss — rather than one straggler. Nothing ever burns a cooldown into empty air, though shields and mending may be laid between waves. Rage runs its own economy: the Ravager reserves 60+ rage finishers for worthy prey — but at 90+ rage it DUMPS freely, because capped rage is rage wasted. A held skill costs nothing: no cooldown, no rage.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>The Necromancer's pack</div>
+              <div className="tiny dim">A Necromancer fights through the dead. Slain foes rise to serve — 35% of the time, 45% from elites, always from a boss — up to <b>three</b> at once, each thrall striking for 18% of your attack. Your own hand softens to 65% to feed them, so a lone necromancer is feeble and a full pack is terrible. Risen flesh rots: every thrall sheds 1.5% of its body each beat and eventually crumbles, so the pack must be fed with fresh dead. Set them to the FRONT line and they meet blows in your place.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}><b style={{ color: "#8a7fb5" }}>Life-Link</b> is a STANCE, not a spell: no cooldown, never cast — it works whenever it is WOVEN and stops the instant you unweave it. While it holds, 35% of every blow you suffer is spread across the pack, your mending flows down the link to them, and each thrall carries +25% body. The binding cuts both ways: when a thrall crumbles, the snapping link burns you for 3% of your max HP.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Companions &amp; formation</div>
               <div className="tiny dim">Beastcallers and Clerics fight through a partner: the companion carries a SHARE of your power (its strikes and HP scale with your stats) while your own numbers are reduced to pay for it — the Cleric most of all, a pure healer at 35% ATK whose Votive Guardian bears 85%. Companions have real HP shown beside the battle: they can FALL (returning after ≈ six beats, or nursed faster at the campfire), and Cleric healing mends them alongside you. Tap the chip on the companion row to set the formation — <b>front line</b> puts your partner ahead to soak every enemy strike and boss breath; <b>back line</b> tucks it behind you so the blows land on you instead. The Cleric's Martyr's Communion transforms grief into might: castable only while the Guardian lies fallen.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Four Elements</div>
@@ -4913,6 +5041,11 @@ function App() {
               <div>Armor: turns {Math.round(mitigation(st.def, g.level, g.race === "terraborn" ? 0.9 : DEF_CAP) * 100)}% of each blow{mitigation(st.def, g.level, g.race === "terraborn" ? 0.9 : DEF_CAP) >= (g.race === "terraborn" ? 0.9 : DEF_CAP) ? " (at the ceiling)" : ` · comfort point ${fmt(defSoftCap(g))} DEF`}</div>
               <div>Harness: {openSlots(g).length}/{SLOT_KEYS.length} straps open{openSlots(g).length < SLOT_KEYS.length ? ` · next: ${SLOTS[SLOT_KEYS.filter((k) => !slotUnlocked(g, k))[0]].name} at ${slotReqText(SLOT_KEYS.filter((k) => !slotUnlocked(g, k))[0])}` : ""}</div>
               <div>Trained: {weaponsFor(g.cls).map((k) => DAMAGE_CLASSES[k].glyph + DAMAGE_CLASSES[k].name).join(" · ")} │ {armorsFor(g.cls).map((k) => ARMOR_TYPES[k].glyph + ARMOR_TYPES[k].name).join(" · ")}</div>
+              {isPackClass(g) && (
+                <div style={{ color: "#8a7fb5" }}>
+                  Pack — {(g.minions || []).length}/{MINION_CAP} thralls · ATK {fmt(Math.round(st.atk * MINION_ATK_SHARE))} each · body {fmt(minionMaxOf(g, st))} · rot {Math.round(MINION_ROT * 100)}%/beat · your hand {Math.round(NECRO_HERO_MUL * 100)}% · {linkOn(g) ? "鎖 Life-Link WOVEN" : "Life-Link unwoven"}
+                </div>
+              )}
               {companionCfg(g) && (() => {
                 const cc = companionCfg(g);
                 const pc = petMaxOf(g, st);
