@@ -28,7 +28,7 @@ const TICK_MS = 600;
 const SAVE_KEY = "war-reforged-save-v1";
 const ECHO_KEY = "war-reforged-echoes";
 const INV_CAP = 40;
-const SAVE_VER = 4;
+const SAVE_VER = 5;
 
 /* storage adapter — uses Claude's artifact storage when available, and falls
    back to the browser's localStorage when the game is published on the web.
@@ -212,10 +212,11 @@ const WEAPON_TYPES = {
   saber: { dcls: "slash", name: "Saber", hands: 1, spd: 1.1, dmg: 0.92, nouns: ["Saber", "Dao", "Willow Blade", "Moon Curve"] },
   dagger: { dcls: "pierce", name: "Daggers", hands: 1, spd: 1.35, dmg: 0.78, nouns: ["Daggers", "Twin Points", "Fang Blades"] },
   whisk: { dcls: "blunt", name: "Fly-Whisk", hands: 1, spd: 1.05, dmg: 0.95, nouns: ["Fly-Whisk", "Horsetail Whisk", "Cloud Whisk"] },
-  glaive: { dcls: "pierce", name: "Glaive", hands: 2, spd: 0.8, dmg: 1.15, nouns: ["Glaive", "Guandao", "Halberd", "War Scythe"] },
+  glaive: { dcls: "slash", name: "Glaive", hands: 2, spd: 0.8, dmg: 1.15, nouns: ["Glaive", "Guandao", "Halberd", "War Scythe"] },
   greatsword: { dcls: "slash", name: "Greatsword", hands: 2, spd: 0.72, dmg: 1.22, nouns: ["Greatsword", "Mountain Cleaver", "Tomb Blade"] },
   staff: { dcls: "blunt", name: "Staff", hands: 2, spd: 0.85, dmg: 1.12, nouns: ["Staff", "Ringed Staff", "Spirit Rod"] },
-  fist: { dcls: "blunt", name: "Fist Weapons", hands: 2, spd: 1.45, dmg: 0.82, nouns: ["Hand Wraps", "Iron Fists", "Tiger Claws", "Cord-Bound Fists"] },
+  fist: { dcls: "blunt", name: "Fist Weapons", hands: 2, spd: 1.45, dmg: 0.82, nouns: ["Hand Wraps", "Iron Fists", "Tiger Fists", "Cord-Bound Fists"] },
+  maul: { dcls: "blunt", name: "Maul", hands: 2, spd: 0.68, dmg: 1.28, nouns: ["Maul", "Great Hammer", "Mountain Breaker", "Temple Bell Hammer"] },
 };
 const CLASS_MASTERY = {
   warrior: ["sword", "greatsword", "glaive"],
@@ -229,12 +230,12 @@ const CLASS_MASTERY = {
   ranger: ["dagger", "saber"],
   berserker: ["greatsword", "glaive", "saber"],
   warlock: ["staff", "whisk"],
-  cleric: ["staff", "whisk"],
+  cleric: ["staff", "whisk", "maul"],
   samurai: ["sword", "saber"],
   druid: ["staff", "fist"],
   necromancer: ["staff", "whisk"],
   spellblade: ["sword", "saber", "staff"],
-  ravager: ["greatsword", "glaive", "fist"],
+  ravager: ["greatsword", "glaive", "fist", "maul"],
   vowkeeper: ["whisk", "staff"],
   chronomancer: ["whisk", "dagger"],
   stormcaller: ["staff", "saber"],
@@ -1279,14 +1280,14 @@ const ETERNALS = [
   { slot: "cloak", name: "Widow's Veil", proc: "frostbite" },
   { slot: "armor", name: "Gravemantle", proc: "stoneveil" },
   { slot: "gloves", name: "Cindergrasp", proc: "scorch" },
-  { slot: "amulet", name: "Wyrmtear", proc: "frostbite" },
-  { slot: "ring", name: "Drowned Signet", proc: "lifedrink" },
-  { slot: "helm", name: "Dreadcrown", proc: "stormbrand" },
+  { slot: "amulet", name: "Wyrmtear", proc: "cindernova" },
+  { slot: "ring", name: "Drowned Signet", proc: "leechfang" },
+  { slot: "helm", name: "Dreadcrown", proc: "stoneveil" },
   { slot: "boots", name: "Void Striders", proc: "hastewind" },
-  { slot: "belt", name: "Cord of Unmaking", proc: "stoneveil" },
-  { slot: "talisman", name: "Leviathan Bone", proc: "greedglint" },
-  { slot: "weapon", name: "The First Hammer", proc: "scorch", wtype: "greatsword" },
-  { slot: "amulet", name: "The Last Word", proc: "hastewind" },
+  { slot: "belt", name: "Cord of Unmaking", proc: "lifedrink" },
+  { slot: "talisman", name: "Leviathan Bone", proc: "stormbrand" },
+  { slot: "weapon", name: "The First Hammer", proc: "scorch", wtype: "maul" },
+  { slot: "amulet", name: "The Last Word", proc: "sagemind" },
 ];
 
 /* ---- foes and waves ---- */
@@ -1904,7 +1905,7 @@ function rewardFoe(g, f, st) {
     }
     if (Math.random() < 0.02 + 0.003 * rank) {
       const E = ETERNALS[g.zone];
-      const eit = makeItem(t, { slot: E.slot, rarity: 6, name: E.name, boost: 1.15 * lvlBoost, favor: soul.favor, wild: "chaos", proc: E.proc, wtype: E.wtype });
+      const eit = makeItem(t, { slot: E.slot, rarity: 6, name: E.name, boost: 1.15 * lvlBoost, favor: soul.favor, wild: "chaos", proc: E.proc, wtype: E.wtype, atype: isArmorSlot(E.slot) ? pick(armorsFor(g.cls)) : undefined });
       pushLog(g, `Something impossible falls from ${f.name}: ${E.name}, the Eternal.`, "boss");
       applyDrop(g, eit);
     }
@@ -2938,7 +2939,18 @@ function migrate(raw) {
     let x = it;
     if (x.proc && !x.procs && PROCS[x.proc]) x = { ...x, procs: { [PROCS[x.proc].cat]: x.proc } };
     if (x.slot === "weapon" && !x.wtype) x = { ...x, wtype: "sword" };
-    if (x.wtype && WEAPON_TYPES[x.wtype] && legacyGear && !weaponsFor(cls).includes(WEAPON_TYPES[x.wtype].dcls)) {
+    const isNamedEternal = x.rarity === 6 && ETERNALS.some((E) => x.name && String(x.name).includes(E.name));
+    if (isNamedEternal && String(x.name).includes("The First Hammer") && x.wtype !== "maul") x = { ...x, wtype: "maul" };
+    if (isNamedEternal) {
+      const E2 = ETERNALS.find((E) => String(x.name).includes(E.name));
+      if (E2 && PROCS[E2.proc]) {
+        const cat2 = PROCS[E2.proc].cat;
+        if ((x.procs || {})[cat2] !== E2.proc) {
+          x = { ...x, procs: { ...(x.procs || {}), [cat2]: E2.proc }, pw: { ...(x.pw || {}), [cat2]: pwAt(E2.proc, 4) } };
+        }
+      }
+    }
+    if (x.wtype && WEAPON_TYPES[x.wtype] && legacyGear && !isNamedEternal && !weaponsFor(cls).includes(WEAPON_TYPES[x.wtype].dcls)) {
       const opts = usableWtypes(cls);
       const pref = (CLASS_MASTERY[cls] || []).find((w) => opts.includes(w));
       if (pref || opts.length) x = { ...x, wtype: pref || opts[0] };
@@ -3906,7 +3918,7 @@ function App() {
       let item;
       if (r < 0.005) {
         const E = ETERNALS[g.zone];
-        item = makeItem(t2, { slot: E.slot, rarity: 6, name: E.name, boost: 1.15, wild: "chaos", proc: E.proc, wtype: E.wtype });
+        item = makeItem(t2, { slot: E.slot, rarity: 6, name: E.name, boost: 1.15, wild: "chaos", proc: E.proc, wtype: E.wtype, atype: isArmorSlot(E.slot) ? pick(armorsFor(g.cls)) : undefined });
       } else if (r < 0.055) {
         const rslot = pickRelicSlot();
         item = makeItem(t2, { slot: rslot, rarity: 4, name: `${SIG_SETS[g.zone]} ${RELIC_NOUNS[rslot]}`, boost: 1.1, set: g.zone, favor: BOSS_SOULS[g.zone].favor, wild: "wild" });
@@ -3931,7 +3943,7 @@ function App() {
       let item;
       if (r < 0.02) {
         const E = ETERNALS[g.zone];
-        item = makeItem(t2, { slot: E.slot, rarity: 6, name: E.name, boost: 1.15, wild: "chaos", proc: E.proc, wtype: E.wtype });
+        item = makeItem(t2, { slot: E.slot, rarity: 6, name: E.name, boost: 1.15, wild: "chaos", proc: E.proc, wtype: E.wtype, atype: isArmorSlot(E.slot) ? pick(armorsFor(g.cls)) : undefined });
       } else if (r < 0.14) item = makeItem(t2, { rarity: 5, wild: "chaos" });
       else item = makeItem(t2, { rarity: 4, wild: "wild" });
       ensureProc(item);
@@ -4538,7 +4550,7 @@ function App() {
               <div className="tiny dim">You do not begin with all sixteen slots. A traveller who fills every strap in the first hour outruns the world entirely, so the harness itself is progression: each slot opens at a level AND a count of zone bosses laid low — boots at Lv 4, helm at 8, gloves at 12 (1 boss), belt 16, offhand 20 (2), bracers 25, cloak 30 (3), pauldrons 36 (4), amulet 42 (5), greaves 48 (6), ring 54 (7), talisman 62 (8), earring 70 (9), anklet 78 (10 bosses). Your stat sheet always names the next one.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Gear for a SEALED strap still drops — at roughly a quarter the usual rate — and you may wear it early. It simply lies <b style={{ color: "#8a7f5a" }}>dormant</b>: no stats, no traits, no wards, no set bonds, nothing, until the strap opens. Then everything you banked wakes at once, which is why an opening is worth celebrating.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Steel, cloth and plate — what your school carries</div>
-              <div className="tiny dim">Every weapon wounds in one of three ways — <b style={{ color: DAMAGE_CLASSES.slash.color }}>刃 Slash</b> (sword, saber, greatsword), <b style={{ color: DAMAGE_CLASSES.pierce.color }}>刺 Pierce</b> (dagger, glaive), <b style={{ color: DAMAGE_CLASSES.blunt.color }}>捶 Blunt</b> (staff, whisk, fists) — and every school trains in some and refuses others. A Cleric keeps to staff and whisk and will not carry an edge; a Samurai answers only with the cut; a Ravager takes whatever is nearest. Training is permission; mastery (the green tag) is excellence atop it.</div>
+              <div className="tiny dim">Every weapon wounds in one of three ways — <b style={{ color: DAMAGE_CLASSES.slash.color }}>刃 Slash</b> (sword, saber, greatsword, glaive — a cutting polearm), <b style={{ color: DAMAGE_CLASSES.pierce.color }}>刺 Pierce</b> (daggers), <b style={{ color: DAMAGE_CLASSES.blunt.color }}>捶 Blunt</b> (staff, whisk, fists, maul) — and every school trains in some and refuses others. A Cleric keeps to staff and whisk and will not carry an edge; a Samurai answers only with the cut; a Ravager takes whatever is nearest. Training is permission; mastery (the green tag) is excellence atop it.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Worn armor has a WEIGHT, and weight decides the shape of its virtues: <b style={{ color: ARMOR_TYPES.robe.color }}>袍 Robe</b> spends shelter for power (−DEF −HP, +ATK +CRIT) · <b style={{ color: ARMOR_TYPES.light.color }}>轻 Light</b> stays swift and keen · <b style={{ color: ARMOR_TYPES.medium.color }}>中 Medium</b> balances · <b style={{ color: ARMOR_TYPES.heavy.color }}>重 Heavy</b> hoards shelter at the cost of edge. Totals stay close across the four — the trade is real, not a ladder. Weight applies to armor, helm, pauldrons, greaves, bracers, gloves and boots; trinkets, cloaks, belts and offhands are unweighted and open to all.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Armor turns a SHARE of every blow rather than shaving off a flat slab: reduction climbs as <b>DEF ÷ (DEF + a threshold that rises with the foe's level)</b>, capped at 85%. Armor therefore keeps pace with the whole journey and rewards every point invested, but never buys immunity — a heavier foe, an elite, a boss, and above all a boss's BREATH (which armor does not turn at all — only elemental resistance blunts it) all land proportionally harder. Your current figure sits on your stat sheet.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Gear you were never trained for is tagged <b style={{ color: "#a86a6a" }}>untrained</b>: it will never be worn or auto-equipped, and waits in your pack or vault (sell it, or keep it for another life). The world knows this — most of what drops suits your school, but not all of it. Your training is listed on your stat sheet.</div>
