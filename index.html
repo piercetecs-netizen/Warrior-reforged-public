@@ -3880,6 +3880,7 @@ function App() {
 
   const [elPick, setElPick] = useState("fire");
   const [lockCat, setLockCat] = useState(null);
+  const [setsOpen, setSetsOpen] = useState(false);
 
   const wardInfusion = () =>
     forgeMutate((g) => {
@@ -4615,21 +4616,30 @@ function App() {
             const { detail } = setTiers(g);
             const active = Object.entries(detail).filter(([, d]) => d.count >= 1);
             if (!active.length) return null;
+            const liveCount = active.reduce((a, [, d]) => a + SET_GROUPS.filter((grp) => d.groups[grp.key]).length + (d.full ? 1 : 0), 0);
             return (
               <div className="setpanel">
-                {active.map(([sIdx, d]) => (
-                  <div key={sIdx} className="setrow">
-                    <span className="small" style={{ color: C.gilt }}>{SIG_SETS[sIdx]} set · {d.count}/{SLOT_KEYS.length} worn</span>
-                    <span className="mono tiny setiers">
-                      {SET_GROUPS.map((grp) => (
-                        <span key={grp.key} style={{ color: d.groups[grp.key] ? C.jade : C.dim }}>
-                          {grp.name} ({grp.slots.map((sl) => SLOTS[sl].name).join("+")}): {grp.text}
-                        </span>
-                      ))}
-                      <span style={{ color: d.full ? C.jade : C.dim }}>Full ×10: boss +15% · +10% all stats</span>
-                    </span>
-                  </div>
-                ))}
+                <button className="setfold" onClick={() => setSetsOpen((o) => !o)}>
+                  <span className="small" style={{ color: C.gilt }}>{setsOpen ? "▾" : "▸"} Set bonds</span>
+                  <span className="mono tiny" style={{ color: liveCount ? C.jade : C.dim }}>{liveCount ? `${liveCount} live` : "none live"}</span>
+                </button>
+                {active.map(([sIdx, d]) => {
+                  const live = SET_GROUPS.filter((grp) => d.groups[grp.key]);
+                  if (!setsOpen && !live.length && !d.full) return null; // collapsed: silent unless something burns green
+                  return (
+                    <div key={sIdx} className="setrow">
+                      <span className="small" style={{ color: C.gilt }}>{SIG_SETS[sIdx]} set · {d.count}/{SLOT_KEYS.length} worn</span>
+                      <span className="mono tiny setiers">
+                        {(setsOpen ? SET_GROUPS : live).map((grp) => (
+                          <span key={grp.key} style={{ color: d.groups[grp.key] ? C.jade : C.dim }}>
+                            {grp.name} ({grp.slots.map((sl) => SLOTS[sl].name).join("+")}): {grp.text}
+                          </span>
+                        ))}
+                        {(setsOpen || d.full) && <span style={{ color: d.full ? C.jade : C.dim }}>Full ×10: boss +15% · +10% all stats</span>}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             );
           })()}
@@ -5469,6 +5479,8 @@ const CSS = `
 .stattable td:nth-child(2) { color: ${C.bone}; font-weight: 500; }
 
 .settag { font-size: 9px; color: ${C.gilt}; border: 1px solid ${C.gilt}; border-radius: 3px; padding: 0 4px; margin-left: 5px; letter-spacing: 0.08em; vertical-align: 1px; text-transform: uppercase; }
+.setfold { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none;
+  border: none; padding: 2px 0 4px; cursor: pointer; }
 .setpanel {
   background: rgba(217,164,65,0.06); border: 1px solid rgba(217,164,65,0.4); border-radius: 8px;
   padding: 8px 10px; display: flex; flex-direction: column; gap: 8px;
