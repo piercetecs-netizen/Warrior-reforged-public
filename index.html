@@ -1845,7 +1845,11 @@ function rewardFoe(g, f, st) {
   }
   if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 6);
   const kprocs = eqProcs(g);
-  if (kprocs.has("lifedrink")) g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * procPower(g, "lifedrink")));
+  if (kprocs.has("lifedrink")) {
+    const ldf = procPower(g, "lifedrink");
+    g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * ldf));
+    if (linkOn(g)) { const mm3 = minionMaxOf(g, st); for (const m of livingMinions(g)) m.hp = Math.min(mm3, m.hp + Math.round(mm3 * ldf)); }
+  }
   if (kprocs.has("hastewind") && Math.random() < 0.15) {
     const hw = procPower(g, "hastewind");
     for (const ck of Object.keys(g.cds)) g.cds[ck] = Math.max(0, g.cds[ck] - hw);
@@ -2207,7 +2211,10 @@ function step(prev) {
       dmg = neutral + elemPart;
     }
     foe.hp -= dmg;
-    if (isCrit && g.race === "moonchild") g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.02));
+    if (isCrit && g.race === "moonchild") {
+      g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.02));
+      if (linked) { const mmc = minionMaxOf(g, st); for (const m of livingMinions(g)) m.hp = Math.min(mmc, m.hp + Math.round(mmc * 0.02)); }
+    }
     if (isCrit && g.cls === "stormcaller") {
       for (const f2 of foes) {
         if (f2 === foe || f2.hp <= 0) continue;
@@ -2594,11 +2601,13 @@ function step(prev) {
     }
     if (procs.has("leechfang") && Math.random() < 0.1) {
       const hl = Math.round(st.maxHp * procPower(g, "leechfang"));
+      if (linked) { const mmf = minionMaxOf(g, st); const pf = procPower(g, "leechfang"); for (const m of livingMinions(g)) m.hp = Math.min(mmf, m.hp + Math.round(mmf * pf)); }
       g.hp = Math.min(st.maxHp, g.hp + hl);
       fx.push({ id: floatSeq++, text: "+" + fmt(hl), crit: false, side: "player", heal: true });
     }
     if (g.race === "bloodkin" && Math.random() < 0.1) {
       const hl = Math.round(st.maxHp * 0.02);
+      if (linked) { const mmb = minionMaxOf(g, st); for (const m of livingMinions(g)) m.hp = Math.min(mmb, m.hp + Math.round(mmb * 0.02)); }
       g.hp = Math.min(st.maxHp, g.hp + hl);
       fx.push({ id: floatSeq++, text: "血+" + fmt(hl), crit: false, side: "player", heal: true });
     }
@@ -2972,10 +2981,17 @@ function migrate(raw) {
   g.bossMeter = ZONES.map((_, i) => (raw.bossMeter && raw.bossMeter[i]) || 0);
   g.materials = { ...base.materials, ...(raw.materials || {}) };
   g.essence = Math.max(0, Math.round(raw.essence || 0));
+  /* retired skill ids map to their successors; anything unknown is dropped so
+     a ghost can never occupy a weave slot invisibly. */
+  const SKILL_RENAMES = { graspdead: "lifelink", judgment2: "communion" };
+  const liveId = (id) => SKILL_RENAMES[id] || id;
+  const knownId = (id) => SKILLS.some((s) => s.id === id);
   g.trained = Array.isArray(raw.trained)
-    ? raw.trained
+    ? [...new Set(raw.trained.map(liveId))].filter(knownId)
     : SKILLS.filter((s) => s.cls === cls && s.lv <= g.level).map((s) => s.id);
-  g.skillsOn = (raw.skillsOn || []).filter((id) => g.trained.includes(id)).slice(0, ((raw.level || 1) >= 50 ? 4 : 3) + (cls === "beastcaller" ? 1 : 0));
+  g.skillsOn = [...new Set((raw.skillsOn || []).map(liveId))]
+    .filter((id) => knownId(id) && g.trained.includes(id))
+    .slice(0, ((raw.level || 1) >= 50 ? 4 : 3) + (cls === "beastcaller" ? 1 : 0));
   g.vigor = clamp(typeof raw.vigor === "number" ? raw.vigor : 100, 0, 100);
   g.restedT = raw.restedT || 0;
   const rawFocus = Array.isArray(raw.focus) ? raw.focus : raw.focus ? [raw.focus] : [];
@@ -3411,9 +3427,15 @@ function App() {
   const toggleSkill = (id) =>
     mutate((g) => {
       const cap = (g.level >= 50 ? 4 : 3) + (g.cls === "beastcaller" ? 1 : 0);
-      if (g.skillsOn.includes(id)) g.skillsOn = g.skillsOn.filter((s) => s !== id);
+      if (g.skillsOn.includes(id)) {
+        g.skillsOn = g.skillsOn.filter((s) => s !== id);
+        if (id === "lifelink") pushLog(g, "The Life-Link goes slack — the pack stands alone.", "sys", "skills");
+      }
       else if (!g.trained.includes(id)) pushLog(g, "Train this skill at camp first.", "sys");
-      else if (g.skillsOn.length < cap) g.skillsOn = [...g.skillsOn, id];
+      else if (g.skillsOn.length < cap) {
+        g.skillsOn = [...g.skillsOn, id];
+        if (id === "lifelink") pushLog(g, "The Life-Link takes hold — the pack's fate is yours.", "lvl", "skills");
+      }
       else pushLog(g, `Only ${cap} skills can be woven at once${g.level < 50 ? " — one more loom opens at level 50" : ""}.`, "sys", "skills");
       return g;
     });
@@ -4515,7 +4537,7 @@ function App() {
               <div className="tiny dim">Woven skills no longer fire the instant they're ready — they wait for the moment they matter. Sustain casts on NEED (heals when you or your companion are hurt — Berserkers cling to their wounds far longer, since bloodrage feeds on them); buffs recast only once the old one fades; running afflictions aren't clobbered; shields aren't stacked onto a full ward. DPS respects the target: great nukes hold when a basic strike would finish common prey (Elites and bosses always merit them), and grand AOE waits for a pack — or a boss — rather than one straggler. Nothing ever burns a cooldown into empty air, though shields and mending may be laid between waves. Rage runs its own economy: the Ravager reserves 60+ rage finishers for worthy prey — but at 90+ rage it DUMPS freely, because capped rage is rage wasted. A held skill costs nothing: no cooldown, no rage.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Necromancer's pack</div>
               <div className="tiny dim">A Necromancer fights through the dead. Slain foes rise to serve — 35% of the time, 45% from elites, always from a boss — up to <b>three</b> at once, each thrall striking for 18% of your attack. Your own hand softens to 65% to feed them, so a lone necromancer is feeble and a full pack is terrible. Risen flesh rots: every thrall sheds 1.5% of its body each beat and eventually crumbles, so the pack must be fed with fresh dead. Set them to the FRONT line and they meet blows in your place.</div>
-              <div className="tiny dim" style={{ marginTop: 4 }}><b style={{ color: "#8a7fb5" }}>Life-Link</b> is a STANCE, not a spell: no cooldown, never cast — it works whenever it is WOVEN and stops the instant you unweave it. While it holds, 35% of every blow you suffer is spread across the pack, your mending flows down the link to them, and each thrall carries +25% body. The binding cuts both ways: when a thrall crumbles, the snapping link burns you for 3% of your max HP.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}><b style={{ color: "#8a7fb5" }}>Life-Link</b> is a STANCE, not a spell: no cooldown, never cast — it works whenever it is WOVEN and stops the instant you unweave it. While it holds, 35% of every blow you suffer is spread across the pack, your mending flows down the link to them, and each thrall carries +25% body. The binding cuts both ways: when a thrall crumbles, the snapping link burns you for 3% of your max HP. Sanguine gains — Leechfang, Lifedrink, Bloodkin's thirst, a Moonchild's crit-mending — count as mending, so while the Link holds they flow down it to the pack in equal measure. Companion classes are the deliberate exception: a beast or Guardian is mended by HEALING, never by the wielder's blood-pacts — lifesteal-sustained companions would let passive gear replace the active care those classes are built around.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Companions &amp; formation</div>
               <div className="tiny dim">Beastcallers and Clerics fight through a partner: the companion carries a SHARE of your power (its strikes and HP scale with your stats) while your own numbers are reduced to pay for it — the Cleric most of all, a pure healer at 35% ATK whose Votive Guardian bears 85%. Companions have real HP shown beside the battle: they can FALL (returning after ≈ six beats, or nursed faster at the campfire), and Cleric healing mends them alongside you. Tap the chip on the companion row to set the formation — <b>front line</b> puts your partner ahead to soak every enemy strike and boss breath; <b>back line</b> tucks it behind you so the blows land on you instead. The Cleric's Martyr's Communion transforms grief into might: castable only while the Guardian lies fallen.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Four Elements</div>
