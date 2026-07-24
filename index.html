@@ -1418,8 +1418,11 @@ function newGame(cls, name, race = "human", bg = "farmhand") {
 }
 
 let logSeq = 1;
-function pushLog(g, msg, kind = "info") {
-  g.log = [...g.log.slice(-11), { id: logSeq++, msg, kind }];
+/* every chronicle line belongs to a CHANNEL, and each tab shows its own.
+   kind still colours the line; chan decides where it appears. */
+const KIND_CHAN = { kill: "battle", boss: "battle", death: "battle", buff: "battle", loot: "gear", melt: "gear", lvl: "battle", sys: "battle", info: "battle" };
+function pushLog(g, msg, kind = "info", chan) {
+  g.log = [...g.log.slice(-119), { id: logSeq++, msg, kind, chan: chan || KIND_CHAN[kind] || "battle" }];
 }
 
 let floatSeq = 1;
@@ -1456,7 +1459,7 @@ function bumpBounty(g, kind) {
     const mq = ri(1, 2);
     g.materials[MATS[bmi].key] += mq;
     pushRibbon(g, "BOUNTY COMPLETE", C.gilt);
-    pushLog(g, `Bounty complete: ${b.label} — +${fmt(b.gold)}g, ${mq}× ${MATS[bmi].name}.`, "lvl");
+    pushLog(g, `Bounty complete: ${b.label} — +${fmt(b.gold)}g, ${mq}× ${MATS[bmi].name}.`, "lvl", "zones");
     g.bountyCd = 6;
   }
 }
@@ -1627,7 +1630,7 @@ function displaceOffhand(g, quiet) {
   if (!off) return;
   g.eq = { ...g.eq, offhand: null };
   if (isVaultClass(off)) {
-    if (!quiet) pushLog(g, `${off.name} yields to the two-handed grip — resting in the vault.`, "sys");
+    if (!quiet) pushLog(g, `${off.name} yields to the two-handed grip — resting in the vault.`, "sys", "vault");
   } else if (g.inv.length < INV_CAP) {
     g.inv = [...g.inv, off];
     if (!quiet) pushLog(g, `${off.name} stowed — the new grip needs both hands.`, "sys");
@@ -1660,7 +1663,7 @@ function applyDrop(g, item, quiet = false) {
         if (!quiet) pushLog(g, `Duplicate attunement — melted ${item.name} +${fmt(item.value)}g${e}.`, "melt");
         return "melt";
       }
-      if (!quiet) pushLog(g, `${item.name} rests in the vault — your two-handed grip leaves no hand free.`, "loot");
+      if (!quiet) pushLog(g, `${item.name} rests in the vault — your two-handed grip leaves no hand free.`, "loot", "vault");
       return "vaulted";
     }
     g.gold += item.value;
@@ -1676,7 +1679,7 @@ function applyDrop(g, item, quiet = false) {
         if (!quiet) pushLog(g, `Duplicate attunement — melted ${item.name} +${fmt(item.value)}g${e}.`, "melt");
         return "melt";
       }
-      if (!quiet) pushLog(g, `${item.name} rests in the vault — your school never trained for it.`, "loot");
+      if (!quiet) pushLog(g, `${item.name} rests in the vault — your school never trained for it.`, "loot", "vault");
       return "vaulted";
     }
     if (g.inv.length >= INV_CAP) {
@@ -1744,7 +1747,7 @@ function applyDrop(g, item, quiet = false) {
   if ((focusGain && bvN >= bvC * 0.85) || bvN > bvC * 1.03 || (noFocusLoss && bvN > bvC * 1.005)) {
     if (g.locked && g.locked[item.slot]) {
       if (vClass) {
-        if (!quiet) pushLog(g, `${item.name} would upgrade your locked ${SLOTS[item.slot].name} — it waits in the vault.`, "loot");
+        if (!quiet) pushLog(g, `${item.name} would upgrade your locked ${SLOTS[item.slot].name} — it waits in the vault.`, "loot", "vault");
         return "vaulted";
       }
       if (g.inv.length >= INV_CAP) {
@@ -1775,7 +1778,7 @@ function applyDrop(g, item, quiet = false) {
       if (!quiet) pushLog(g, `Duplicate attunement — melted ${item.name} +${fmt(item.value)}g${e}.`, "melt");
       return "melt";
     }
-    if (!quiet) pushLog(g, `${item.name} rests in the vault (−${fmt(Math.max(0, bvC - bvN))} vs worn).`, "loot");
+    if (!quiet) pushLog(g, `${item.name} rests in the vault (−${fmt(Math.max(0, bvC - bvN))} vs worn).`, "loot", "vault");
     return "vaulted";
   }
   if (bvN > bvC * 0.97) {
@@ -1882,7 +1885,7 @@ function rewardFoe(g, f, st) {
       g.huntRank = [...g.huntRank];
       g.huntRank[g.zone] += 1;
       if (g.huntRank[g.zone] > 1) pushRibbon(g, `HUNT RANK ${g.huntRank[g.zone]}`, C.gilt);
-      if (g.huntRank[g.zone] > 1) pushLog(g, `Hunt Rank ${g.huntRank[g.zone]}: ${f.name.replace(/^[\u4e00-\u9fff] /, "")} will return harder — and richer.`, "boss");
+      if (g.huntRank[g.zone] > 1) pushLog(g, `Hunt Rank ${g.huntRank[g.zone]}: ${f.name.replace(/^[\u4e00-\u9fff] /, "")} will return harder — and richer.`, "boss", "zones");
     }
     applyDrop(g, makeItem(t, { minRarity: 3, boost: lvlBoost * 0.95, favor: soul.favor, wild: wildMode }));
     applyDrop(g, makeItem(t, { minRarity: 2, boost: lvlBoost * 0.9, favor: soul.favor, wild: wildMode }));
@@ -1932,7 +1935,7 @@ function rewardFoe(g, f, st) {
     if (g.level % 10 === 0) {
       const realm = realmOf(g.level);
       pushSplash(g, "BREAKTHROUGH", `${realm} Realm — Level ${g.level}`, C.gilt, 9600);
-      pushLog(g, `You break through to the ${realm} Realm. The heavens take notice.`, "lvl");
+      pushLog(g, `You break through to the ${realm} Realm. The heavens take notice.`, "lvl", "zones");
       const bq = ri(3, 5);
       g.materials[MATS[mi].key] += bq;
       pushLog(g, `Breakthrough tribute: ${bq}× ${MATS[mi].name} and a worthy arm.`, "loot");
@@ -1959,7 +1962,7 @@ function rewardFoe(g, f, st) {
     if (g.throneKills % 25 === 0) {
       g.ascension = (g.ascension || 0) + 1;
       pushRibbon(g, `ASCENSION ${g.ascension} — THE THRONE CLIMBS`, C.violet);
-      pushLog(g, `Ascension ${g.ascension}: the Throne's foes sharpen (+8% each), and so do its spoils (+6%).`, "boss");
+      pushLog(g, `Ascension ${g.ascension}: the Throne's foes sharpen (+8% each), and so do its spoils (+6%).`, "boss", "zones");
     }
   }
   if (f.isBoss) {
@@ -2094,7 +2097,7 @@ function step(prev) {
         const sk = SKILLS.find((s) => s.id === tr.id);
         g.trained = [...g.trained, tr.id];
         g.training = null;
-        pushLog(g, `Training complete: ${sk ? sk.name : "skill"} mastered. Weave it in Skills.`, "lvl");
+        pushLog(g, `Training complete: ${sk ? sk.name : "skill"} mastered. Weave it in Skills.`, "lvl", "skills");
         if (sk) pushSplash(g, "SKILL MASTERED", sk.name, C.storm);
       } else g.training = tr;
     }
@@ -2481,7 +2484,7 @@ function step(prev) {
     const fresh = nowOpen.filter((k) => !seen.includes(k));
     if (fresh.length) {
       g.openSeen = nowOpen;
-      for (const k of fresh) pushLog(g, `Your harness gives — the ${SLOTS[k].name} strap opens. Anything you banked for it wakes now.`, "lvl");
+      for (const k of fresh) pushLog(g, `Your harness gives — the ${SLOTS[k].name} strap opens. Anything you banked for it wakes now.`, "lvl", "gear");
       pushRibbon(g, fresh.length > 1 ? "STRAPS OPEN" : `${SLOTS[fresh[0]].name.toUpperCase()} STRAP OPEN`, C.gilt);
     }
   }
@@ -2847,7 +2850,7 @@ function applyOffline(g) {
     if (g.bounty.have >= g.bounty.need) {
       g.bounty.done = true;
       g.gold += g.bounty.gold;
-      pushLog(g, `Bounty complete while away: ${g.bounty.label} — +${fmt(g.bounty.gold)}g.`, "lvl");
+      pushLog(g, `Bounty complete while away: ${g.bounty.label} — +${fmt(g.bounty.gold)}g.`, "lvl", "zones");
     }
   }
   g.vigor = Math.max(25, g.vigor - kills * 0.35 * (g.bg === "farmhand" ? 0.75 : 1));
@@ -3097,6 +3100,35 @@ function HeroFig({ cls, camping }) {
   );
 }
 
+function ThrallFig() {
+  return (
+    <svg className="beastfig" width="22" height="28" viewBox="0 0 22 28" fill="none" stroke="#9a8fc5" strokeWidth="1.8" strokeLinecap="round">
+      <circle cx="11" cy="6" r="3.6" />
+      <path d="M8.6 7.4l1 .8M13.4 7.4l-1 .8" strokeWidth="1.2" />
+      <path d="M11 10v8M11 13l-4.5 3M11 13l4.5 2.5M11 18l-3.5 8M11 18l3.5 8" />
+      <path d="M6 15.5l-2 .5M16 15Q17.5 14 18 12.5" strokeWidth="1.2" opacity="0.7" />
+    </svg>
+  );
+}
+
+function TabLog({ g, chan, title, empty }) {
+  const list = (g.log || []).filter((l) => l.chan === chan);
+  return (
+    <>
+      <div className="sectionlabel" style={{ marginTop: 12 }}>{title}</div>
+      <div className="forgelog">
+        {list.length === 0 ? (
+          <div className="dim tiny">{empty}</div>
+        ) : (
+          list.slice().reverse().slice(0, 40).map((l) => (
+            <div key={l.id} className={"forgeline " + (l.kind || "sys")}>{l.msg}</div>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
 function FoeFig({ f, hurtKey }) {
   const scale = f.isBoss ? 1.5 : f.isElite ? 1.2 : f.inPack ? 0.85 : 1;
   const col = f.el && ELEMENTS[f.el] ? ELEMENTS[f.el].color : f.isBoss ? "#c8452c" : f.isElite ? "#6c8fc4" : "#b8593f";
@@ -3289,7 +3321,7 @@ function App() {
       if (item.slot === "weapon" && isTwoH(item)) displaceOffhand(g, false);
       const old = g.eq[item.slot];
       if (old) {
-        if (isVaultClass(old)) pushLog(g, `${old.name} returns to the vault's keeping.`, "sys");
+        if (isVaultClass(old)) pushLog(g, `${old.name} returns to the vault's keeping.`, "sys", "vault");
         else g.inv = [...g.inv, old];
       }
       g.eq = { ...g.eq, [item.slot]: item };
@@ -3307,7 +3339,7 @@ function App() {
       g.inv = g.inv.filter((i) => i.id !== item.id);
       const off = g.eq.offhand;
       if (off) {
-        if (isVaultClass(off)) pushLog(g, `${off.name} returns to the vault's keeping.`, "sys");
+        if (isVaultClass(off)) pushLog(g, `${off.name} returns to the vault's keeping.`, "sys", "vault");
         else g.inv = [...g.inv, off];
       }
       g.eq = { ...g.eq, offhand: { ...item, slot: "offhand" } };
@@ -3321,7 +3353,7 @@ function App() {
       if (isVaultClass(item)) {
         g.inv = g.inv.filter((i) => i.id !== item.id);
         vaultStore(g, item);
-        pushLog(g, `${item.name} is attuned — it cannot be melted. It rests in the vault.`, "sys");
+        pushLog(g, `${item.name} is attuned — it cannot be melted. It rests in the vault.`, "sys", "vault");
         return g;
       }
       g.inv = g.inv.filter((i) => i.id !== item.id);
@@ -3342,9 +3374,9 @@ function App() {
       if (melt.length) {
         g.essence = (g.essence || 0) + es;
         g.gold += v;
-        pushLog(g, `Melted ${melt.length} items for ${fmt(v)} gold${es ? ` · +${es}精` : ""}${keep.length ? ` · ${keep.length} attuned piece${keep.length > 1 ? "s" : ""} sealed in the vault` : ""}.`, "loot");
+        pushLog(g, `Melted ${melt.length} items for ${fmt(v)} gold${es ? ` · +${es}精` : ""}${keep.length ? ` · ${keep.length} attuned piece${keep.length > 1 ? "s" : ""} sealed in the vault` : ""}.`, "loot", "vault");
       } else if (keep.length) {
-        pushLog(g, `${keep.length} attuned piece${keep.length > 1 ? "s" : ""} sealed in the vault — nothing melted.`, "sys");
+        pushLog(g, `${keep.length} attuned piece${keep.length > 1 ? "s" : ""} sealed in the vault — nothing melted.`, "sys", "vault");
       }
       g.inv = [];
       return g;
@@ -3381,7 +3413,7 @@ function App() {
       if (g.skillsOn.includes(id)) g.skillsOn = g.skillsOn.filter((s) => s !== id);
       else if (!g.trained.includes(id)) pushLog(g, "Train this skill at camp first.", "sys");
       else if (g.skillsOn.length < cap) g.skillsOn = [...g.skillsOn, id];
-      else pushLog(g, `Only ${cap} skills can be woven at once${g.level < 50 ? " — one more loom opens at level 50" : ""}.`, "sys");
+      else pushLog(g, `Only ${cap} skills can be woven at once${g.level < 50 ? " — one more loom opens at level 50" : ""}.`, "sys", "skills");
       return g;
     });
 
@@ -3398,10 +3430,10 @@ function App() {
     mutate((g) => {
       const sk = SKILLS.find((s) => s.id === id);
       if (!sk || g.trained.includes(id) || g.level < sk.lv) return g;
-      if (g.training) pushLog(g, `You set aside ${SKILLS.find((s) => s.id === g.training.id)?.name || "your studies"}.`, "sys");
+      if (g.training) pushLog(g, `You set aside ${SKILLS.find((s) => s.id === g.training.id)?.name || "your studies"}.`, "sys", "skills");
       const tt = Math.round(sk.tt * (g.bg === "orphan" ? 0.7 : 1));
       g.training = { id, left: tt, total: tt };
-      pushLog(g, `Training ${sk.name} — progress only while camped.`, "sys");
+      pushLog(g, `Training ${sk.name} — progress only while camped.`, "sys", "skills");
       return g;
     });
 
@@ -3638,7 +3670,7 @@ function App() {
       };
       const stow = (it) => {
         if (!it || usedIds.has(it.id)) return;
-        if (isVaultClass(it)) { pushLog(g, `${it.name} rests in the vault.`, "sys"); return; }
+        if (isVaultClass(it)) { pushLog(g, `${it.name} rests in the vault.`, "sys", "vault"); return; }
         if (g.inv.length < INV_CAP && !packTaken.has(it.id)) g.inv = [...g.inv, it];
         else { g.gold += it.value; }
       };
@@ -3711,12 +3743,12 @@ function App() {
       const old = g.eq[v.slot];
       g.eq = { ...g.eq, [v.slot]: { ...v, id: itemSeq++ } };
       if (old) {
-        if (isVaultClass(old)) pushLog(g, `${old.name} returns to the vault's keeping.`, "sys");
+        if (isVaultClass(old)) pushLog(g, `${old.name} returns to the vault's keeping.`, "sys", "vault");
         else if (g.inv.length < INV_CAP) g.inv = [...g.inv, old];
         else { g.gold += old.value; pushLog(g, `Pack full — ${old.name} melted.`, "melt"); }
       }
       g.hp = Math.min(g.hp, calcStats(g).maxHp);
-      pushLog(g, `Drawn from the vault: ${v.name}.`, "sys");
+      pushLog(g, `Drawn from the vault: ${v.name}.`, "sys", "vault");
       return g;
     });
 
@@ -4137,11 +4169,26 @@ function App() {
 
         {/* battle scene — vector actors, fixed height, nothing shifts */}
         <div className={"scene" + (fighting ? " fighting" : "") + (g.camping ? " camping" : "")}>
+          {!g.camping && <div className={"zoneamb amb-" + BOSS_EL[g.zone % BOSS_EL.length]} />}
           {(g.zone === ZONES.length - 1 && (g.ascension || 0) > 0) && (
-            <div className="asctag mono tiny">ASC {g.ascension}</div>
+            <>
+              <div className="ascring" style={{ animationDuration: Math.max(4, 14 - g.ascension) + "s", opacity: Math.min(0.5, 0.18 + g.ascension * 0.04) }} />
+              <div className="asctag mono tiny">ASC {g.ascension}</div>
+            </>
           )}
           <div className="sceneline" />
           <div className={"heroSpot" + (g.dead > 0 ? " fallen" : "") + (lowHp ? " lowfig" : "")}>
+            {g.buffs.shield > 0 && g.dead === 0 && (
+              <div className="shieldarc" style={{ opacity: Math.min(0.9, 0.35 + (g.buffs.shield / Math.max(1, st.maxHp)) * 1.2) }} />
+            )}
+            {g.cls === "berserker" && g.dead === 0 && !g.camping && g.hp < st.maxHp * 0.7 && (
+              <div className="bloodaura" style={{ opacity: Math.min(0.85, (1 - g.hp / Math.max(1, st.maxHp)) * 1.1) }} />
+            )}
+            {g.cls === "ravager" && (g.rage || 0) >= 90 && g.dead === 0 && <div className="rageflare" />}
+            {g.cls === "vowkeeper" && g.dead === 0 && !g.camping && (
+              <div className={"vowring" + (g.buffs.vowT > 0 ? " vowhot" : "")} />
+            )}
+            {g.cls === "chronomancer" && g.dead === 0 && !g.camping && <div className="chronomote" />}
             <HeroFig cls={g.cls} camping={g.camping} />
           </div>
           {companionCfg(g) && !g.camping && g.dead === 0 && g.pet && g.pet.hp > 0 && (
@@ -4149,6 +4196,11 @@ function App() {
               {companionCfg(g).kind === "guardian" ? <GuardianFig /> : <BeastFig />}
             </div>
           )}
+          {isPackClass(g) && !g.camping && g.dead === 0 && livingMinions(g).map((m, i) => (
+            <div key={i} className={"minionSpot" + (g.formation === "back" ? " backline" : "")} style={{ left: (g.formation === "back" ? 0 : 52) + i * 15 + "px", opacity: 0.6 + 0.4 * (m.hp / Math.max(1, m.maxHp)) }}>
+              <ThrallFig />
+            </div>
+          ))}
           {fighting && lastEnemyFx && (
             <svg key={"s" + lastEnemyFx.id} className={"slashfx" + (lastEnemyFx.crit ? " critslash" : "")} width="46" height="46" viewBox="0 0 46 46" fill="none" strokeLinecap="round">
               <path d="M6 36C16 30 30 16 40 6" stroke={lastEnemyFx.crit ? C.gilt : C.bone} strokeWidth={lastEnemyFx.crit ? 3.4 : 2.4} />
@@ -4160,6 +4212,20 @@ function App() {
             ) : g.dead > 0 ? null : g.enemies && g.enemies.length ? (
               g.enemies.slice(0, 3).map((f, i) => (
                 <div key={i} className="foeStack" style={{ marginLeft: i ? -12 : 0, opacity: i ? 0.7 : 1 }}>
+                  {f.el && (
+                    <div
+                      className={"foeaura" + (f.isBoss ? " bossaura" : "") + (f.enrage > 1 ? " enraged" : "")}
+                      style={{ "--ac": ELEMENTS[f.el].color }}
+                    />
+                  )}
+                  {f.mut && i === 0 && (
+                    <span className="mutbadge mono" style={{ color: f.mut === "Gilded" ? C.gilt : f.mut === "Frenzied" ? C.cinnabar : f.mut === "Voidtouched" ? C.violet : f.mut === "Bulwarked" ? "#6c8fc4" : "#b8b29c" }}>
+                      {f.mut === "Frenzied" ? "†" : f.mut === "Bulwarked" ? "⛨" : f.mut === "Voidtouched" ? "✦" : f.mut === "Gilded" ? "◉" : "○"}
+                    </span>
+                  )}
+                  {i === 0 && f.isBoss && (f.bsN || 0) % 2 === 0 && f.bsT < 1.6 && f.el && (
+                    <span className="breathwarn mono" style={{ color: ELEMENTS[f.el].color }}>{ELEMENTS[f.el].glyph}息!</span>
+                  )}
                   <FoeFig f={f} hurtKey={i === 0 ? "h" + (lastEnemyFx ? lastEnemyFx.id : 0) : "s"} />
                 </div>
               ))
@@ -4362,7 +4428,7 @@ function App() {
             {g.camping ? "Break camp — return to the hunt" : "Set up camp — rest, sleep, and train"}
           </button>
           <div className="log mono">
-            {g.log.slice().reverse().map((l) => (
+            {g.log.filter((l) => l.chan === "battle").slice(-14).reverse().map((l) => (
               <div key={l.id} className={"logline " + l.kind}>{l.msg}</div>
             ))}
           </div>
@@ -4606,6 +4672,7 @@ function App() {
                 </div>
               );
             })}
+          <TabLog g={g} chan="gear" title="Gear Ledger" empty="Nothing yet — drops, equips, melts and strap-openings land here." />
         </div>
       )}
 
@@ -4877,6 +4944,7 @@ function App() {
               ))
             )}
           </div>
+          <TabLog g={g} chan="skills" title="Training Record" empty="Nothing yet — training, mastery and weave changes land here." />
         </div>
       )}
 
@@ -4918,6 +4986,7 @@ function App() {
                 </div>
               </div>
             ))}
+          <TabLog g={g} chan="vault" title="Vault Register" empty="Nothing yet — attunements, vault-keepings and duplicate meltings land here." />
         </div>
       )}
 
@@ -4998,6 +5067,7 @@ function App() {
               <button className="btn tiny ghost" onClick={() => setConfirmReset(true)}>Start over</button>
             )}
           </div>
+          <TabLog g={g} chan="zones" title="Road Journal" empty="Nothing yet — realms, bosses, hunts, bounties and ascension land here." />
         </div>
       )}
 
@@ -5179,6 +5249,66 @@ const CSS = `
 /* battle scene graphics */
 .scene { position: relative; height: 58px; margin: 2px 0 6px; overflow: hidden; }
 .sceneline { position: absolute; left: 0; right: 0; bottom: 5px; border-bottom: 1px solid ${C.line}; opacity: 0.6; }
+/* ---- renovated scene: every effect reads real state ---- */
+.zoneamb { position: absolute; inset: 0; pointer-events: none; z-index: 0; opacity: 0.5; }
+.amb-fire { background:
+  radial-gradient(2px 2px at 12% 88%, #e0562f88, transparent 60%),
+  radial-gradient(1.6px 1.6px at 34% 96%, #ffa25666, transparent 60%),
+  radial-gradient(2px 2px at 58% 92%, #e0562f77, transparent 60%),
+  radial-gradient(1.4px 1.4px at 81% 97%, #ffb36655, transparent 60%);
+  background-size: 100% 200%; animation: emberrise 5.5s linear infinite; }
+@keyframes emberrise { from { background-position: 0 110%; } to { background-position: 0 -60%; } }
+.amb-water { background: repeating-linear-gradient(105deg, transparent 0 11px, #5fa8c822 11px 12px);
+  animation: raindrift 1.6s linear infinite; }
+@keyframes raindrift { from { background-position: 0 -30px; } to { background-position: -22px 30px; } }
+.amb-storm { animation: stormflash 6s steps(1) infinite; }
+@keyframes stormflash { 0%, 91% { background: transparent; } 92% { background: #cfe0ff2e; } 93% { background: transparent; } 95% { background: #cfe0ff1c; } 96%, 100% { background: transparent; } }
+.amb-earth { background:
+  radial-gradient(1.6px 1.6px at 22% 30%, #b08d4f55, transparent 60%),
+  radial-gradient(1.2px 1.2px at 66% 55%, #b08d4f44, transparent 60%),
+  radial-gradient(1.6px 1.6px at 88% 25%, #c8a45f44, transparent 60%);
+  background-size: 130% 130%; animation: motedrift 9s ease-in-out infinite alternate; }
+@keyframes motedrift { from { background-position: 0 0; } to { background-position: 24px 10px; } }
+.ascring { position: absolute; left: 50%; top: 58%; width: 150px; height: 150px; margin: -75px 0 0 -75px;
+  border-radius: 50%; pointer-events: none; z-index: 0;
+  background: conic-gradient(from 0deg, transparent 0 20deg, ${C.violet}55 24deg 26deg, transparent 30deg 80deg, ${C.violet}44 84deg 86deg, transparent 90deg 140deg, ${C.violet}55 144deg 146deg, transparent 150deg 200deg, ${C.violet}44 204deg 206deg, transparent 210deg 260deg, ${C.violet}55 264deg 266deg, transparent 270deg 320deg, ${C.violet}44 324deg 326deg, transparent 330deg);
+  -webkit-mask: radial-gradient(circle, transparent 62%, #000 64%, #000 70%, transparent 72%);
+  mask: radial-gradient(circle, transparent 62%, #000 64%, #000 70%, transparent 72%);
+  animation-name: ascspin; animation-timing-function: linear; animation-iteration-count: infinite; }
+@keyframes ascspin { to { transform: rotate(360deg); } }
+.foeaura { position: absolute; left: 50%; bottom: -2px; width: 44px; height: 16px; margin-left: -22px;
+  border-radius: 50%; pointer-events: none; z-index: -1;
+  background: radial-gradient(closest-side, var(--ac), transparent 70%);
+  opacity: 0.5; animation: aurapulse 1.8s ease-in-out infinite; }
+.foeaura.bossaura { width: 62px; height: 22px; margin-left: -31px; opacity: 0.7; }
+.foeaura.enraged { animation-duration: 0.55s; filter: saturate(1.6) brightness(1.25); }
+@keyframes aurapulse { 0%, 100% { transform: scaleX(1); opacity: 0.42; } 50% { transform: scaleX(1.18); opacity: 0.72; } }
+.mutbadge { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 11px;
+  text-shadow: 0 0 7px currentColor; animation: badgebob 2.2s ease-in-out infinite; pointer-events: none; }
+@keyframes badgebob { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -3px); } }
+.breathwarn { position: absolute; top: -28px; left: 50%; transform: translateX(-50%); font-size: 13px; font-weight: 700;
+  text-shadow: 0 0 9px currentColor; animation: warnblink 0.4s steps(2) infinite; pointer-events: none; }
+@keyframes warnblink { 50% { opacity: 0.25; } }
+.shieldarc { position: absolute; right: -10px; top: 2px; width: 15px; height: 44px; pointer-events: none;
+  border-right: 2.5px solid ${C.jade}; border-radius: 0 60% 60% 0 / 0 50% 50% 0;
+  box-shadow: 2px 0 9px ${C.jade}66; animation: shieldhum 2.4s ease-in-out infinite; }
+@keyframes shieldhum { 50% { box-shadow: 2px 0 14px ${C.jade}99; } }
+.bloodaura { position: absolute; inset: -6px -8px; pointer-events: none; border-radius: 50%;
+  background: radial-gradient(closest-side, transparent 55%, ${C.cinnabar}55 82%, transparent);
+  animation: bloodbeat 0.9s ease-in-out infinite; }
+@keyframes bloodbeat { 50% { transform: scale(1.12); } }
+.rageflare { position: absolute; inset: -4px -6px; pointer-events: none; border-radius: 40%;
+  box-shadow: 0 0 13px 3px #d14b2fbb; animation: bloodbeat 0.5s ease-in-out infinite; }
+.vowring { position: absolute; left: 50%; bottom: -3px; width: 46px; height: 13px; margin-left: -23px; pointer-events: none;
+  border: 1.4px solid #d8c9a066; border-radius: 50%; }
+.vowring.vowhot { border-color: #d8c9a0; box-shadow: 0 0 11px #d8c9a099; animation: aurapulse 0.8s ease-in-out infinite; }
+.chronomote { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; border-radius: 50%; pointer-events: none;
+  background: #8fb5c8; box-shadow: 0 0 6px #8fb5c8; animation: orbit 2.4s linear infinite; }
+@keyframes orbit { from { transform: rotate(0deg) translateX(26px); } to { transform: rotate(360deg) translateX(26px); } }
+.foeStack { position: relative; }
+.minionSpot { position: absolute; bottom: 3px; z-index: 1; transition: left 0.4s ease; }
+.minionSpot.backline { z-index: 0; }
+.fighting .minionSpot { animation: lunge 0.6s ease-in-out infinite; animation-delay: 0.15s; }
 .heroSpot { position: absolute; left: 10px; bottom: 3px; }
 .fighting .heroSpot { animation: lunge 0.6s ease-in-out infinite; }
 @keyframes lunge { 0%,100% { transform: translateX(0); } 35% { transform: translateX(7px); } }
