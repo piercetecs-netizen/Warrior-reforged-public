@@ -2684,7 +2684,12 @@ function step(prev) {
         if (f.bsN % 2 === 1) {
           const bel = f.el || "fire";
           let bd2 = Math.max(1, Math.round(f.atk * 2.2 * rnd(0.9, 1.1) * (1 - playerRes(g, bel))));
-          if (petFront) {
+          if (packOn && livingMinions(g).length && g.formation !== "back") {
+            const tgtM = livingMinions(g)[0];
+            tgtM.hp -= bd2;
+            fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息髅 −" + fmt(bd2), crit: true, side: "beast" });
+            if (tgtM.hp <= 0) pushLog(g, "The breath scours a thrall to ash.", "sys");
+          } else if (petFront) {
             g.pet.hp -= bd2;
             fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息 −" + fmt(bd2), crit: true, side: "beast" });
             if (g.pet.hp <= 0) { g.pet.hp = 0; g.pet.downT = 10; pushRibbon(g, petCfg.kind === "guardian" ? "THE GUARDIAN FALLS" : "YOUR BEAST FALLS", C.cinnabar); pushLog(g, "Your companion is struck down — it will return, in time.", "boss"); }
@@ -2712,7 +2717,7 @@ function step(prev) {
       let dmgM = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(st.def * 0.75, f.lvl))));
       if (f.el) dmgM = Math.max(1, Math.round(dmgM * (1 - playerRes(g, f.el))));
       tgt.hp -= dmgM;
-      fx.push({ id: floatSeq++, text: "髅 −" + fmt(dmgM), crit: false, side: "beast" });
+      fx.push({ id: floatSeq++, text: "髅guard −" + fmt(dmgM), crit: false, side: "beast" });
       if (tgt.hp <= 0) pushLog(g, "A thrall collapses back into loose bones.", "sys");
       continue;
     }
@@ -2740,7 +2745,7 @@ function step(prev) {
           const each = Math.max(1, Math.round(share / alive.length));
           for (const m of alive) m.hp -= each;
           edmg = Math.max(1, edmg - share);
-          fx.push({ id: floatSeq++, text: "鎖 −" + fmt(share), crit: false, side: "beast" });
+          fx.push({ id: floatSeq++, text: "鎖link −" + fmt(share), crit: false, side: "beast" });
         }
       }
     }
@@ -4327,7 +4332,7 @@ function App() {
             <div className="beastrow">
               <span className="beastglyph" style={{ color: col, textShadow: `0 0 8px ${col}88` }}>髅</span>
               <span className="mono tiny" style={{ color: col }}>
-                Pack {pack.length}/{MINION_CAP}{link ? " · 鎖 linked" : ""}
+                Pack {pack.length}/{MINION_CAP}{link ? " · 鎖 linked" : ""}{pack.length > 0 && g.enemies && g.enemies.length > 0 && !g.camping ? " · rotting" : ""}
               </span>
               <button className="chip formchip" onClick={toggleFormation}>
                 {g.formation === "back" ? "⇠ back line" : "front line ⇢"}
@@ -4537,6 +4542,7 @@ function App() {
               <div className="tiny dim">Woven skills no longer fire the instant they're ready — they wait for the moment they matter. Sustain casts on NEED (heals when you or your companion are hurt — Berserkers cling to their wounds far longer, since bloodrage feeds on them); buffs recast only once the old one fades; running afflictions aren't clobbered; shields aren't stacked onto a full ward. DPS respects the target: great nukes hold when a basic strike would finish common prey (Elites and bosses always merit them), and grand AOE waits for a pack — or a boss — rather than one straggler. Nothing ever burns a cooldown into empty air, though shields and mending may be laid between waves. Rage runs its own economy: the Ravager reserves 60+ rage finishers for worthy prey — but at 90+ rage it DUMPS freely, because capped rage is rage wasted. A held skill costs nothing: no cooldown, no rage.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Necromancer's pack</div>
               <div className="tiny dim">A Necromancer fights through the dead. Slain foes rise to serve — 35% of the time, 45% from elites, always from a boss — up to <b>three</b> at once, each thrall striking for 18% of your attack. Your own hand softens to 65% to feed them, so a lone necromancer is feeble and a full pack is terrible. Risen flesh rots: every thrall sheds 1.5% of its body each beat and eventually crumbles, so the pack must be fed with fresh dead. Set them to the FRONT line and they meet blows in your place.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Three things wound a thrall, and only one is the Link: <b>rot</b> (1.5%/beat in battle, always — the pack row reads "rotting"); <b>front-line guarding</b> (髅guard floats — whole blows and boss breath, purely formation, woven or not); and the <b>Link's 35% share</b> (鎖link floats — only while Life-Link is woven, only on blows that reach YOU, so a front-lined pack never shows it). Unweave the Link and the 鎖 stops; the guarding and the rot were never its doing.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}><b style={{ color: "#8a7fb5" }}>Life-Link</b> is a STANCE, not a spell: no cooldown, never cast — it works whenever it is WOVEN and stops the instant you unweave it. While it holds, 35% of every blow you suffer is spread across the pack, your mending flows down the link to them, and each thrall carries +25% body. The binding cuts both ways: when a thrall crumbles, the snapping link burns you for 3% of your max HP. Sanguine gains — Leechfang, Lifedrink, Bloodkin's thirst, a Moonchild's crit-mending — count as mending, so while the Link holds they flow down it to the pack in equal measure. Companion classes are the deliberate exception: a beast or Guardian is mended by HEALING, never by the wielder's blood-pacts — lifesteal-sustained companions would let passive gear replace the active care those classes are built around.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Companions &amp; formation</div>
               <div className="tiny dim">Beastcallers and Clerics fight through a partner: the companion carries a SHARE of your power (its strikes and HP scale with your stats) while your own numbers are reduced to pay for it — the Cleric most of all, a pure healer at 35% ATK whose Votive Guardian bears 85%. Companions have real HP shown beside the battle: they can FALL (returning after ≈ six beats, or nursed faster at the campfire), and Cleric healing mends them alongside you. Tap the chip on the companion row to set the formation — <b>front line</b> puts your partner ahead to soak every enemy strike and boss breath; <b>back line</b> tucks it behind you so the blows land on you instead. The Cleric's Martyr's Communion transforms grief into might: castable only while the Guardian lies fallen.</div>
