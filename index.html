@@ -3399,11 +3399,12 @@ function App() {
 
   const toggleFormation = () =>
     mutate((g) => {
-      if (!companionCfg(g)) return g;
+      if (!companionCfg(g) && !isPackClass(g)) return g; // anyone with partners may order them
       g.formation = g.formation === "back" ? "front" : "back";
+      const plural = isPackClass(g);
       pushLog(g, g.formation === "back"
-        ? "Your companion falls back — you take the blows now."
-        : "Your companion strides to the front line, shielding you.", "sys");
+        ? (plural ? "The pack falls back — you take the blows now." : "Your companion falls back — you take the blows now.")
+        : (plural ? "The pack shambles to the front line, shielding you." : "Your companion strides to the front line, shielding you."), "sys");
       return g;
     });
 
