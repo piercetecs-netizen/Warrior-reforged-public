@@ -3177,8 +3177,33 @@ function ItemIcon({ slot, color, size = 18 }) {
   );
 }
 
-function HeroFig({ cls, camping }) {
+function HeroFig({ cls, camping, vowT }) {
   const c = CLASSES[cls];
+  if (cls === "vowkeeper" && !camping) {
+    /* no weapon, no swing — a braced stance, open hands turned outward, and
+       the vow written in the ring of sigils that answers on their behalf */
+    return (
+      <svg className="herofig vowfig" width="46" height="52" viewBox="0 0 46 52" fill="none" stroke="#e8dcc3" strokeWidth="2" strokeLinecap="round">
+        <g className={"vowsigils" + (vowT > 0 ? " vowlit" : "")} stroke={c.color} strokeWidth={vowT > 0 ? 2.2 : 1.6} opacity={vowT > 0 ? 1 : 0.9}>
+          <path d="M8 26h3M35 26h3M21.5 3v3M12.5 12l2 2M30.5 12l-2 2" />
+        </g>
+        <circle cx="21" cy="11" r="5" />
+        <path d="M21 16v14" />
+        {/* feet planted wide — this one does not advance */}
+        <path d="M21 30l-7 14M21 30l7 14M13 44h3M26 44h3" />
+        {/* arms low and open, palms outward: refusing the strike, not making one */}
+        <g className="vowarms">
+          <path d="M21 20l-8 7" />
+          <path d="M21 20l8 7" />
+          <path d="M13 27l-2.5 2M13 27l-.5 3M13 27l2 2.5" strokeWidth="1.5" />
+          <path d="M29 27l2.5 2M29 27l.5 3M29 27l-2 2.5" strokeWidth="1.5" />
+        </g>
+        {/* prayer-cord at the wrist */}
+        <path d="M27.5 25.5q2.5 2 1.5 4.5" stroke={c.color} strokeWidth="1.4" />
+        <path d="M12 19q9-6 18-1" stroke={c.color} strokeWidth="2.4" />
+      </svg>
+    );
+  }
   const weapon = { warrior: "sword", blademaster: "sword", mage: "staff", beastcaller: "staff", taoist: "whisk", monk: "fist", shadow: "sword", sentinel: "shield", ranger: "bow", berserker: "sword", warlock: "staff", cleric: "staff", samurai: "sword", druid: "staff", necromancer: "staff", spellblade: "sword", ravager: "sword", vowkeeper: "whisk", chronomancer: "staff", stormcaller: "staff" }[cls] || "sword";
   if (camping) {
     return (
@@ -4314,7 +4339,7 @@ function App() {
             </>
           )}
           <div className="sceneline" />
-          <div className={"heroSpot" + (g.dead > 0 ? " fallen" : "") + (lowHp ? " lowfig" : "")}>
+          <div className={"heroSpot" + (g.dead > 0 ? " fallen" : "") + (lowHp ? " lowfig" : "") + (g.cls === "vowkeeper" ? " vowstance" : "")}>
             {g.buffs.shield > 0 && g.dead === 0 && (
               <div className="shieldarc" style={{ opacity: Math.min(0.9, 0.35 + (g.buffs.shield / Math.max(1, st.maxHp)) * 1.2) }} />
             )}
@@ -4326,7 +4351,7 @@ function App() {
               <div className={"vowring" + (g.buffs.vowT > 0 ? " vowhot" : "")} />
             )}
             {g.cls === "chronomancer" && g.dead === 0 && !g.camping && <div className="chronomote" />}
-            <HeroFig cls={g.cls} camping={g.camping} />
+            <HeroFig cls={g.cls} camping={g.camping} vowT={g.buffs.vowT} />
           </div>
           {companionCfg(g) && !g.camping && g.dead === 0 && g.pet && g.pet.hp > 0 && (
             <div className={"beastSpot" + (g.formation === "back" ? " backline" : "")}>
@@ -5489,6 +5514,14 @@ const CSS = `
 @keyframes lunge { 0%,100% { transform: translateX(0); } 35% { transform: translateX(7px); } }
 .fighting .armF { animation: swing 0.6s ease-in-out infinite; transform-origin: 18px 19px; }
 @keyframes swing { 0%,100% { transform: rotate(6deg); } 35% { transform: rotate(-16deg); } }
+/* the Vow: no advance, no swing — the stance settles and the sigils turn */
+.fighting .heroSpot.vowstance { animation: brace 1.9s ease-in-out infinite; }
+@keyframes brace { 0%,100% { transform: translateY(0); } 50% { transform: translateY(1.5px); } }
+.vowfig .vowarms { animation: vowbreathe 2.6s ease-in-out infinite; transform-origin: 21px 20px; }
+@keyframes vowbreathe { 0%,100% { transform: scale(1); opacity: 0.95; } 50% { transform: scale(1.06); opacity: 1; } }
+.vowfig .vowsigils { animation: vowturn 5.5s linear infinite; transform-origin: 21px 26px; }
+.vowfig .vowsigils.vowlit { animation-duration: 1.6s; filter: drop-shadow(0 0 4px currentColor); }
+@keyframes vowturn { to { transform: rotate(360deg); } }
 .heroSpot.fallen { transform: rotate(78deg) translate(8px,-4px); opacity: 0.7; animation: none; }
 .heroSpot.fallen .armF { animation: none; }
 .beastSpot { position: absolute; left: 58px; bottom: 2px; }
