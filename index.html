@@ -3180,31 +3180,40 @@ function ItemIcon({ slot, color, size = 18 }) {
 function HeroFig({ cls, camping, vowT }) {
   const c = CLASSES[cls];
   if (cls === "vowkeeper" && !camping) {
-    /* no weapon, no swing — a braced stance, open hands turned outward, and
-       the vow written in the ring of sigils that answers on their behalf */
+    /* Drawn in SIDE PROFILE, facing the foe — a hooded keeper in a
+       floor-length robe, rendered as ONE CLOSED SILHOUETTE. No arms, no legs
+       and no weapon exist in this figure: at 46px any line that leaves the
+       body reads as a spike, so nothing leaves it. The hands are clasped
+       inside the robe at the front; the hem reaches the ground, because this
+       one never advances. */
     return (
-      <svg className="herofig vowfig" width="46" height="52" viewBox="0 0 46 52" fill="none" stroke="#e8dcc3" strokeWidth="2" strokeLinecap="round">
-        <g className={"vowsigils" + (vowT > 0 ? " vowlit" : "")} stroke={c.color} strokeWidth={vowT > 0 ? 2.2 : 1.6} opacity={vowT > 0 ? 1 : 0.9}>
-          <path d="M8 26h3M35 26h3M21.5 3v3M12.5 12l2 2M30.5 12l-2 2" />
+      <svg className="herofig vowfig" width="46" height="52" viewBox="0 0 46 52" fill="none" stroke="#e8dcc3" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle
+          className={"vowsigils" + (vowT > 0 ? " vowlit" : "")}
+          cx="22" cy="26" r="17" stroke={c.color}
+          strokeWidth={vowT > 0 ? 1.9 : 1.3}
+          strokeDasharray="1.6 7"
+          opacity={vowT > 0 ? 0.95 : 0.45}
+        />
+        <g className="vowrobe">
+          {/* hood peak → brow → the fall of the robe → hem → back → back of hood */}
+          <path d="M21 5Q28 5.5 28.5 13L31 42q-9 3 -18 0L16.5 14Q15.5 5.5 21 5Z" fill="#161923" />
+          {/* the shadow inside the hood, set forward where the face looks out */}
+          <ellipse cx="25" cy="13.4" rx="2.9" ry="4" fill="#0b0d13" stroke="none" />
+          <path d="M26.4 13.1h1.2" stroke={c.color} strokeWidth="1.3" opacity="0.9" />
+          {/* cowl edge across the shoulders */}
+          <path d="M17.6 18.4q5.4-2.4 10.8-1" stroke={c.color} strokeWidth="1.4" opacity="0.8" />
+          {/* hands clasped at the front of the body — folded in, never reaching out */}
+          <path d="M23.8 23.4q2.6 1.4 3.4 3.4" strokeWidth="1.5" />
+          {/* sash, prayer beads, and the fall of the robe */}
+          <path d="M17.2 26q5.8 2 11.4 .4" stroke={c.color} strokeWidth="2" />
+          <path d="M26.6 28.4v3.9" stroke={c.color} strokeWidth="1.2" />
+          <circle cx="26.6" cy="33.3" r="1.1" stroke={c.color} strokeWidth="1.2" />
+          <path d="M20 29L18.6 40.6M24.6 29.2L25.2 40.8" strokeWidth="1.1" opacity="0.6" />
         </g>
-        <circle cx="21" cy="11" r="5" />
-        <path d="M21 16v14" />
-        {/* feet planted wide — this one does not advance */}
-        <path d="M21 30l-7 14M21 30l7 14M13 44h3M26 44h3" />
-        {/* arms low and open, palms outward: refusing the strike, not making one */}
-        <g className="vowarms">
-          <path d="M21 20l-8 7" />
-          <path d="M21 20l8 7" />
-          <path d="M13 27l-2.5 2M13 27l-.5 3M13 27l2 2.5" strokeWidth="1.5" />
-          <path d="M29 27l2.5 2M29 27l.5 3M29 27l-2 2.5" strokeWidth="1.5" />
-        </g>
-        {/* prayer-cord at the wrist */}
-        <path d="M27.5 25.5q2.5 2 1.5 4.5" stroke={c.color} strokeWidth="1.4" />
-        <path d="M12 19q9-6 18-1" stroke={c.color} strokeWidth="2.4" />
       </svg>
     );
   }
-  const weapon = { warrior: "sword", blademaster: "sword", mage: "staff", beastcaller: "staff", taoist: "whisk", monk: "fist", shadow: "sword", sentinel: "shield", ranger: "bow", berserker: "sword", warlock: "staff", cleric: "staff", samurai: "sword", druid: "staff", necromancer: "staff", spellblade: "sword", ravager: "sword", vowkeeper: "whisk", chronomancer: "staff", stormcaller: "staff" }[cls] || "sword";
   if (camping) {
     return (
       <svg className="herofig" width="44" height="52" viewBox="0 0 44 52" fill="none" stroke="#e8dcc3" strokeWidth="2" strokeLinecap="round">
@@ -5517,9 +5526,9 @@ const CSS = `
 /* the Vow: no advance, no swing — the stance settles and the sigils turn */
 .fighting .heroSpot.vowstance { animation: brace 1.9s ease-in-out infinite; }
 @keyframes brace { 0%,100% { transform: translateY(0); } 50% { transform: translateY(1.5px); } }
-.vowfig .vowarms { animation: vowbreathe 2.6s ease-in-out infinite; transform-origin: 21px 20px; }
-@keyframes vowbreathe { 0%,100% { transform: scale(1); opacity: 0.95; } 50% { transform: scale(1.06); opacity: 1; } }
-.vowfig .vowsigils { animation: vowturn 5.5s linear infinite; transform-origin: 21px 26px; }
+.vowfig .vowrobe { animation: vowbreathe 3.4s ease-in-out infinite; transform-origin: 22px 43px; }
+@keyframes vowbreathe { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(1.022); } }
+.vowfig .vowsigils { animation: vowturn 5.5s linear infinite; transform-origin: 22px 26px; }
 .vowfig .vowsigils.vowlit { animation-duration: 1.6s; filter: drop-shadow(0 0 4px currentColor); }
 @keyframes vowturn { to { transform: rotate(360deg); } }
 .heroSpot.fallen { transform: rotate(78deg) translate(8px,-4px); opacity: 0.7; animation: none; }
