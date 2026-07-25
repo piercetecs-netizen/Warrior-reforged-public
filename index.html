@@ -1411,7 +1411,7 @@ function newGame(cls, name, race = "human", bg = "farmhand") {
     echoes: 0, rebirths: 0,
     vault: [], runes: {}, pendingUpgrades: [],
     rage: 0, chrono: 0, pet: null, minions: [], formation: "front", openSeen: ["weapon", "armor"], forgeLog: [],
-    ascension: 0, throneKills: 0, huntRank: ZONES.map(() => 0),
+    ascension: 0, ascHigh: 0, ascCap: null, throneKills: 0, huntRank: ZONES.map(() => 0),
     loadoutIdx: 0, loadouts: [null, null, null],
     loadoutFocus: [null, null, null],
     savedAt: Date.now(),
@@ -1964,10 +1964,11 @@ function rewardFoe(g, f, st) {
   }
   if (g.zone === ZONES.length - 1) {
     g.throneKills = (g.throneKills || 0) + 1;
-    if (g.throneKills % 25 === 0) {
+    if (g.throneKills % 25 === 0 && (g.ascension || 0) < (g.ascCap == null ? 99 : g.ascCap)) {
       g.ascension = (g.ascension || 0) + 1;
+      g.ascHigh = Math.max(g.ascHigh || 0, g.ascension);
       pushRibbon(g, `ASCENSION ${g.ascension} — THE THRONE CLIMBS`, C.violet);
-      pushLog(g, `Ascension ${g.ascension}: the Throne's foes sharpen (+8% each), and so do its spoils (+6%).`, "boss", "zones");
+      pushLog(g, `Ascension ${g.ascension}: the Throne's foes sharpen (+8% each), and so do its spoils (+6%). You may step back down at the Throne whenever it asks too much.`, "boss", "zones");
     }
   }
   if (f.isBoss) {
@@ -2064,6 +2065,19 @@ function step(prev) {
   const linked = packOn && linkOn(g);
   if (packOn) {
     if (!Array.isArray(g.minions)) g.minions = [];
+    /* GRAVE-CALL — a boss fight is a field of older dead. While a boss stands
+       and the pack is short, the ground gives one up every few beats, so the
+       Necromancer's hero tax is never paid against an empty board. */
+    const bossHere = (g.enemies || []).some((f2) => f2 && f2.isBoss && f2.hp > 0);
+    if (bossHere && g.minions.length < MINION_CAP) {
+      g.graveCall = (g.graveCall || 0) + 1;
+      if (g.graveCall >= 6) {
+        g.graveCall = 0;
+        const mmG = minionMaxOf(g, st);
+        g.minions = [...g.minions, { hp: mmG, maxHp: mmG, name: "Risen Bones" }];
+        pushLog(g, `The floor splits — old bones claw up to serve (${g.minions.length}/${MINION_CAP}).`, "lvl", "battle");
+      }
+    } else if (!bossHere) g.graveCall = 0;
     for (const m of g.minions) {
       m.maxHp = mCap;
       m.hp = Math.min(m.hp, mCap);
@@ -2979,6 +2993,8 @@ function migrate(raw) {
     ? raw.minions.slice(0, MINION_CAP).map((m) => ({ hp: Math.max(1, Math.round(m.hp || 1)), maxHp: Math.max(1, Math.round(m.maxHp || 1)), name: String(m.name || "Thrall") }))
     : [];
   g.ascension = Math.max(0, raw.ascension | 0);
+  g.ascHigh = Math.max(g.ascension, raw.ascHigh | 0);
+  g.ascCap = raw.ascCap == null ? null : Math.max(0, raw.ascCap | 0);
   g.throneKills = Math.max(0, raw.throneKills | 0);
   g.huntRank = ZONES.map((_, i) => clamp((Array.isArray(raw.huntRank) ? raw.huntRank[i] : 0) | 0, 0, 10));
   g.pet = raw.pet && typeof raw.pet === "object" ? { hp: Math.max(0, Math.round(raw.pet.hp || 0)), downT: Math.max(0, raw.pet.downT || 0) } : null;
@@ -3435,6 +3451,28 @@ function App() {
     });
 
   const clearForgeLog = () => mutate((g) => { g.forgeLog = []; return g; });
+
+  const setAscension = (n) =>
+    mutate((g) => {
+      const hi = g.ascHigh || 0;
+      const v = Math.max(0, Math.min(hi, Math.round(n)));
+      if (v === (g.ascension || 0)) return g;
+      g.ascension = v;
+      if (g.ascCap != null) g.ascCap = v;
+      pushLog(g, v === 0
+        ? "You step down to the Throne's ground floor. The air stops screaming."
+        : `You stand at Ascension ${v} — foes +${Math.round(v * 8)}%, spoils +${Math.round(v * 6)}%.`, "boss", "zones");
+      return g;
+    });
+
+  const toggleAscHold = () =>
+    mutate((g) => {
+      g.ascCap = g.ascCap == null ? (g.ascension || 0) : null;
+      pushLog(g, g.ascCap == null
+        ? "You let the Throne climb freely again."
+        : `You hold the Throne at Ascension ${g.ascension || 0}. It will climb no further on its own.`, "sys", "zones");
+      return g;
+    });
 
   const toggleFormation = () =>
     mutate((g) => {
@@ -4559,6 +4597,9 @@ function App() {
               <div className="tiny dim">The middle realms (5–55) climb steeply on purpose — that's where builds are forged, so each realm is lived in rather than blurred past. Beyond 55 the slope eases and MARQUEE kills carry you: Elites are worth +35% XP, bosses +50%. The world sharpens too: past 55, lesser foes may bear a war-omen — <b style={{ color: C.cinnabar }}>Frenzied</b> (harder, +25% XP) · <b style={{ color: C.storm }}>Bulwarked</b> (tougher, +40% gold) · <b style={{ color: C.violet }}>Voidtouched</b> (element-warded, +20% XP) · <b style={{ color: C.gilt }}>Gilded</b> (frail, gold ×2) · <b>Hollowed</b> (leaks 2精). Every boss rematch raises its HUNT RANK (to 10): it returns +10% stronger each rank but pays +5% XP, +3% relic chance, and better Eternal odds. And the Throne of Silence now ASCENDS — every 25 kills there, its foes gain +8% and its spoils +6%, forever. The end is a ladder, not a plateau.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>How skills choose their moment</div>
               <div className="tiny dim">Woven skills no longer fire the instant they're ready — they wait for the moment they matter. Sustain casts on NEED (heals when you or your companion are hurt — Berserkers cling to their wounds far longer, since bloodrage feeds on them); buffs recast only once the old one fades; running afflictions aren't clobbered; shields aren't stacked onto a full ward. DPS respects the target: great nukes hold when a basic strike would finish common prey (Elites and bosses always merit them), and grand AOE waits for a pack — or a boss — rather than one straggler. A skill whose element the foe wholly NULLS (a boss facing its own element) is held rather than cast for zero — the weave leans on neutral and off-element work until the immunity passes. Nothing ever burns a cooldown into empty air, though shields and mending may be laid between waves. Rage runs its own economy: the Ravager reserves 60+ rage finishers for worthy prey — but at 90+ rage it DUMPS freely, because capped rage is rage wasted. A held skill costs nothing: no cooldown, no rage.</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>The Throne, and what the late game pays</div>
+              <div className="tiny dim">The Throne of Silence climbs forever: every 25 kills there raises ASCENSION, sharpening its foes by 8% and its spoils by 6% per tier. That climb is a <b>dial, not a ratchet</b> — step down at the Throne whenever it asks more than you can answer, hold it where it sits, or climb back when you are ready. Your highest reach is remembered regardless.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Understand what the late game rewards. Once foes fall below your level, XP is floored at 40% and a level costs hundreds of thousands — levelling is deliberately over. From there the compounding reward is <b>Reincarnation</b>: shed the life, keep an Echo for every 4 levels and 3 for every boss sealed, and every Echo grants +1% XP and gold and +0.5% to ALL stats in every future life, forever. A walled character is not a dead end; it is a full purse waiting to be spent.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Necromancer's pack</div>
               <div className="tiny dim">A Necromancer fights through the dead. Slain foes rise to serve — 35% of the time, 45% from elites, always from a boss — up to <b>three</b> at once, each thrall striking for 18% of your attack. Your own hand softens to 65% to feed them, so a lone necromancer is feeble and a full pack is terrible. Risen flesh rots: every thrall sheds 1.5% of its body each beat and eventually crumbles, so the pack must be fed with fresh dead. Set them to the FRONT line and they meet blows in your place.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Three things wound a thrall, and only one is the Link: <b>rot</b> (1.5%/beat in battle, always — the pack row reads "rotting"); <b>front-line guarding</b> (髅guard floats — whole blows and boss breath, purely formation, woven or not); and the <b>Link's 35% share</b> (鎖link floats — only while Life-Link is woven, only on blows that reach YOU, so a front-lined pack never shows it). Unweave the Link and the 鎖 stops; the guarding and the rot were never its doing.</div>
@@ -5094,7 +5135,7 @@ function App() {
 
           <div className="sectionlabel" style={{ marginTop: 12 }}>Reincarnation 转世</div>
           <div className="dim small">
-            Shed this life and carry its Echoes forward forever: each Echo grants +1% XP and gold and +0.5% to all stats in every future life.
+            Shed this life and carry its Echoes forward forever: each Echo grants +1% XP and gold and +0.5% to all stats in every future life. This — not another level — is what the late game pays out: past the point where foes fall below your level, XP is floored and Echoes become the only progress that compounds.
             {(g.echoes || 0) > 0 ? ` You bear ${g.echoes} Echo${g.echoes > 1 ? "es" : ""} from ${g.rebirths} past ${g.rebirths > 1 ? "lives" : "life"}.` : ""}
           </div>
           {!g.bossDown[ZONES.length - 1] ? (
@@ -5124,6 +5165,31 @@ function App() {
               <button className="btn tiny ghost" onClick={() => setConfirmReset(true)}>Start over</button>
             )}
           </div>
+          {g.zone === ZONES.length - 1 && (g.ascHigh || 0) > 0 && (
+            <>
+              <div className="sectionlabel" style={{ marginTop: 12 }}>Ascension — the Throne's dial</div>
+              <div className="tiny dim">
+                Each tier sharpens the Throne's foes by 8% and its spoils by 6%. The climb is yours to set:
+                step down when it asks too much, climb again when you can answer. Your highest reach ({g.ascHigh}) is remembered either way.
+              </div>
+              <div className="focusrow" style={{ marginTop: 4 }}>
+                <button className="btn tiny" disabled={(g.ascension || 0) <= 0} onClick={() => setAscension((g.ascension || 0) - 1)}>− descend</button>
+                <span className="mono tiny" style={{ color: C.violet, alignSelf: "center" }}>
+                  ASC {g.ascension || 0} / {g.ascHigh} · foes +{Math.round((g.ascension || 0) * 8)}% · spoils +{Math.round((g.ascension || 0) * 6)}%
+                </span>
+                <button className="btn tiny" disabled={(g.ascension || 0) >= (g.ascHigh || 0)} onClick={() => setAscension((g.ascension || 0) + 1)}>climb +</button>
+                <button className="btn tiny ghost" disabled={(g.ascension || 0) === 0} onClick={() => setAscension(0)}>ground floor</button>
+              </div>
+              <div className="tiny dim" style={{ marginTop: 3 }}>
+                {(g.ascCap == null || g.ascCap > (g.ascension || 0))
+                  ? "The Throne will keep climbing on its own every 25 kills."
+                  : "Held here — the Throne will not climb past this on its own."}
+                <button className="chip" style={{ marginLeft: 6 }} onClick={toggleAscHold}>
+                  {g.ascCap == null ? "hold here" : "let it climb"}
+                </button>
+              </div>
+            </>
+          )}
           <TabLog g={g} chan="zones" title="Road Journal" empty="Nothing yet — realms, bosses, hunts, bounties and ascension land here." />
         </div>
       )}
