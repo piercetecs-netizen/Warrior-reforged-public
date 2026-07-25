@@ -2036,7 +2036,10 @@ const TACT = {
   shields: new Set(["aegis", "barkskin", "bearhide", "blessing", "bulwark2", "camostep", "ironbody", "ironskin", "manaward", "parryflow", "parrystance", "resurrection", "sanctuary", "sanctum", "smokeveil", "staticveil", "stillmind", "unbreakable", "ward"]),
   debuffs: new Set(["challenge", "curse", "patience", "warcry2"]),
   dots: new Set(["bleedingedge", "envenom", "flamestrike", "hex", "plaguetouch", "serpentarrow", "serpentvenom", "soulflame"]),
-  lateHeals: new Set(["graceful", "regrowth", "reversal"]),
+  lateHeals: new Set(["graceful", "regrowth", "renew", "reversal"]),
+  /* damage or guard skills that also mend — never held for elemental immunity,
+     because the mending half still matters (and reaches the thralls) */
+  healRiders: new Set(["drainlife", "holynova", "innerfire", "sanctuary", "sanctum", "soulrend", "unbreakable", "ward", "wildshape"]),
   bigHeals: new Set(["laststand", "painfeast", "resurrection"]),
   nukePw: {ancestorfist: 10.0, annihilate: 11.0, beastking: 8.0, berserkrush: 12.5, falconvolley: 11.5, finalcut: 12.0, paradox: 12.0, stormlance: 5.2, titanwrath: 9.0},
   aoeBig: new Set(["apocalypse", "avatar", "cataclysm", "finalvow", "meteor", "ragequake", "skyfall", "spellstorm", "supernova"]),
@@ -2115,15 +2118,22 @@ function step(prev) {
         pushLog(g, `The floor splits — old bones claw up to serve (${g.minions.length}/${MINION_CAP}).`, "lvl", "battle");
       }
     } else if (!bossHere) g.graveCall = 0;
+    /* rot never pauses: a thrall decays in battle, between waves and at the
+       fire alike — and decays FASTER at rest, with no fighting to animate it. */
+    const rotRate = MINION_ROT * (g.camping ? 2 : 1);
     for (const m of g.minions) {
       m.maxHp = mCap;
       m.hp = Math.min(m.hp, mCap);
-      if ((g.enemies || []).length) m.hp -= Math.max(1, Math.round(mCap * MINION_ROT)); // g.enemies: foes is not bound until far below
+      m.hp -= Math.max(1, Math.round(mCap * rotRate));
     }
     const fell = g.minions.filter((m) => m.hp <= 0).length;
     if (fell) {
       g.minions = g.minions.filter((m) => m.hp > 0);
-      if (linked) {
+      if (g.camping) {
+        pushLog(g, fell > 1
+          ? `${fell} thralls come apart by the fire. The dead do not keep.`
+          : "A thrall comes apart by the fire. The dead do not keep.", "sys", "battle");
+      } else if (linked) {
         const burn = Math.max(1, Math.round(st.maxHp * 0.03 * fell));
         g.hp = Math.max(1, g.hp - burn);
         fx.push({ id: floatSeq++, text: "鎖 −" + fmt(burn), crit: false, side: "player" });
@@ -2216,7 +2226,7 @@ function step(prev) {
   /* conditional heals fire when YOU need mending — or your companion does */
   const needsHealing = (frac) => {
     if (g.hp < st.maxHp * frac) return true;
-    if (linkOn(g)) { const mm = minionMaxOf(g, st); if (livingMinions(g).some((m) => m.hp < mm * frac)) return true; }
+    if (isPackClass(g)) { const mm = minionMaxOf(g, st); if (livingMinions(g).some((m) => m.hp < mm * frac)) return true; }
     if (petCfg && g.pet && g.pet.hp > 0 && g.pet.hp < petMaxOf(g, st) * frac) return true;
     return false;
   };
@@ -2224,11 +2234,15 @@ function step(prev) {
     const amt = Math.round(st.maxHp * frac * healMul);
     g.hp = Math.min(st.maxHp, g.hp + amt);
     fx.push({ id: floatSeq++, text: "+" + fmt(amt), crit: false, side: "player", heal: true });
-    if (linked) {
+    if (isPackClass(g)) {
+      /* deliberate mending always reaches the thralls; the Life-Link merely
+         carries it in full, where an unwoven pack gets half the tending. */
       const alive = livingMinions(g);
       const mm = minionMaxOf(g, st);
-      for (const m of alive) m.hp = Math.min(mm, m.hp + Math.round(mm * frac * healMul));
-      if (alive.length) fx.push({ id: floatSeq++, text: "鎖 +" + fmt(Math.round(mm * frac * healMul)), crit: false, side: "beast", heal: true });
+      const share = frac * healMul * (linked ? 1 : 0.5);
+      const amtM = Math.round(mm * share);
+      if (amtM > 0) for (const m of alive) m.hp = Math.min(mm, m.hp + amtM);
+      if (alive.length) fx.push({ id: floatSeq++, text: (linked ? "鎖 +" : "髅 +") + fmt(amtM), crit: false, side: "beast", heal: true });
     }
     if (petCfg && g.pet && g.pet.hp > 0) {
       const pm2 = petMaxOf(g, st);
@@ -2326,7 +2340,7 @@ function step(prev) {
            the cooldown. Skills with any living rider (heal/shield/buff) keep
            their flags path; damage swaps to neutral and off-element weaves. */
         const gel = (sk && sk.el) || SKILL_EL[sid] || null;
-        if (gel && !flags.length && foes[0] && foeElemMod(gel, foes[0]) === 0) continue;
+        if (gel && !flags.length && !TACT.healRiders.has(sid) && foes[0] && foeElemMod(gel, foes[0]) === 0) continue;
         if (TACT.dots.has(sid) && (b.dotT > 1.5 || (!worthy && frontHp < baseAtk * 1.2))) continue;
         const npw = TACT.nukePw[sid];
         if (npw && !worthy && frontHp < baseAtk * 1.6 && !overflowing) continue; // basics will finish it
@@ -2452,7 +2466,7 @@ function step(prev) {
       case "soulburn": b.atkMult = 1.25; b.atkT = 6; b.critAdd = 20; b.critT = 6; pushLog(g, "Soul burns bright.", "buff"); break;
       case "cataclysm": dealAllE(10, "Cataclysm"); break;
       case "smite": dealFrontE(2.5, "Smite"); break;
-      case "renew": if (needsHealing(0.75)) heal(0.25); else cast = false; break;
+      case "renew": heal(0.25); break; // gated by TACT.lateHeals, which now watches the pack too
       case "blessing": gainShield(st.maxHp * 0.25); b.atkMult = 1.2; b.atkT = 5; pushLog(g, "A blessing steadies you.", "buff"); break;
       case "holynova": dealAllE(2.6, "Nova"); heal(0.12); break;
       case "sanctuary": gainShield(st.maxHp * 0.4); heal(0.15); pushLog(g, "Sanctuary surrounds you.", "buff"); break;
@@ -2876,6 +2890,7 @@ function applyOffline(g) {
   const now = Date.now();
   const sec = clamp((now - (g.savedAt || now)) / 1000, 0, 8 * 3600);
   if (sec < 90) return { g, report: null };
+  if (isPackClass(g) && (g.minions || []).length) g.minions = []; // nothing risen survives an absence
 
   if (g.camping) {
     const st = calcStats(g);
@@ -4426,7 +4441,7 @@ function App() {
             <div className="beastrow">
               <span className="beastglyph" style={{ color: col, textShadow: `0 0 8px ${col}88` }}>髅</span>
               <span className="mono tiny" style={{ color: col }}>
-                Pack {pack.length}/{MINION_CAP}{link ? " · 鎖 linked" : ""}{pack.length > 0 && g.enemies && g.enemies.length > 0 && !g.camping ? " · rotting" : ""}
+                Pack {pack.length}/{MINION_CAP}{link ? " · 鎖 linked" : ""}{pack.length > 0 ? (g.camping ? " · rotting fast" : " · rotting") : ""}
               </span>
               <button className="chip formchip" onClick={toggleFormation}>
                 {g.formation === "back" ? "⇠ back line" : "front line ⇢"}
@@ -4638,9 +4653,9 @@ function App() {
               <div className="tiny dim">The Throne of Silence climbs forever: every 25 kills there raises ASCENSION, sharpening its foes by 8% and its spoils by 6% per tier. That climb is a <b>dial, not a ratchet</b> — step down at the Throne whenever it asks more than you can answer, hold it where it sits, or climb back when you are ready. Your highest reach is remembered regardless.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Understand what the late game rewards. Once foes fall below your level, XP is floored at 40% and a level costs hundreds of thousands — levelling is deliberately over. From there the compounding reward is <b>Reincarnation</b>: shed the life, keep an Echo for every 4 levels and 3 for every boss sealed, and every Echo grants +1% XP and gold and +0.5% to ALL stats in every future life, forever. A walled character is not a dead end; it is a full purse waiting to be spent.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Necromancer's pack</div>
-              <div className="tiny dim">A Necromancer fights through the dead. Every foe you slay rises to serve while the pack has room — no dice, a body is a body — up to <b>three</b> at once, each thrall striking for 18% of your attack. Against a lone boss no corpse falls until the fight ends, so there the ground itself gives up older dead every few beats instead. Your own hand softens to 65% to feed them, so a lone necromancer is feeble and a full pack is terrible. Risen flesh rots: every thrall sheds 1.5% of its body each beat and eventually crumbles, so the pack must be fed with fresh dead. Set them to the FRONT line and they meet blows in your place.</div>
+              <div className="tiny dim">A Necromancer fights through the dead. Every foe you slay rises to serve while the pack has room — no dice, a body is a body — up to <b>three</b> at once, each thrall striking for 18% of your attack. Against a lone boss no corpse falls until the fight ends, so there the ground itself gives up older dead every few beats instead. Your own hand softens to 65% to feed them, so a lone necromancer is feeble and a full pack is terrible. Risen flesh rots and never stops rotting: a thrall sheds 1.5% of its body every beat — in battle, between waves, and at the fire alike — so the pack must be fed with fresh dead. At camp it goes <b>twice as fast</b>, with no fighting left to animate it, and the fire will not knit a corpse back together: rest long enough and you break camp alone. Nothing risen survives an absence either. When a thrall comes apart at the fire you are released rather than torn, so the Life-Link exacts no toll for it. Set them to the FRONT line and they meet blows in your place.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Three things wound a thrall, and only one is the Link: <b>rot</b> (1.5%/beat in battle, always — the pack row reads "rotting"); <b>front-line guarding</b> (髅guard floats — whole blows and boss breath, purely formation, woven or not); and the <b>Link's 35% share</b> (鎖link floats — only while Life-Link is woven, only on blows that reach YOU, so a front-lined pack never shows it). Unweave the Link and the 鎖 stops; the guarding and the rot were never its doing.</div>
-              <div className="tiny dim" style={{ marginTop: 4 }}><b style={{ color: "#8a7fb5" }}>Life-Link</b> is a STANCE, not a spell: no cooldown, never cast — it works whenever it is WOVEN and stops the instant you unweave it. While it holds, 35% of every blow you suffer is spread across the pack, your mending flows down the link to them, and each thrall carries +25% body. The binding cuts both ways: when a thrall crumbles, the snapping link burns you for 3% of your max HP. Sanguine gains — Leechfang, Lifedrink, Bloodkin's thirst, a Moonchild's crit-mending — count as mending, so while the Link holds they flow down it to the pack in equal measure. Companion classes are the deliberate exception: a beast or Guardian is mended by HEALING, never by the wielder's blood-pacts — lifesteal-sustained companions would let passive gear replace the active care those classes are built around.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}><b style={{ color: "#8a7fb5" }}>Life-Link</b> is a STANCE, not a spell: no cooldown, never cast — it works whenever it is WOVEN and stops the instant you unweave it. While it holds, 35% of every blow you suffer is spread across the pack, your mending reaches them in full rather than halved, and each thrall carries +25% body. The binding cuts both ways: when a thrall crumbles, the snapping link burns you for 3% of your max HP. Deliberate mending is CARE, not a blood-pact: a healing skill or a night at the fire tends your thralls whether or not the Link is woven (at half strength unwoven, in full while it holds), and the battle AI now reaches for a heal when a THRALL is hurt, not only when you are. Sanguine gains — Leechfang, Lifedrink, Bloodkin's thirst, a Moonchild's crit-mending — are blood rather than care, so those flow to the pack only while the Link holds. Companion classes are the deliberate exception: a beast or Guardian is mended by HEALING, never by the wielder's blood-pacts — lifesteal-sustained companions would let passive gear replace the active care those classes are built around.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Companions &amp; formation</div>
               <div className="tiny dim">Beastcallers and Clerics fight through a partner: the companion carries a SHARE of your power (its strikes and HP scale with your stats) while your own numbers are reduced to pay for it — the Cleric most of all, a pure healer at 35% ATK whose Votive Guardian bears 85%. Companions have real HP shown beside the battle: they can FALL (returning after ≈ six beats, or nursed faster at the campfire), and Cleric healing mends them alongside you. Tap the chip on the companion row to set the formation — <b>front line</b> puts your partner ahead to soak every enemy strike and boss breath; <b>back line</b> tucks it behind you so the blows land on you instead. The Cleric's Martyr's Communion transforms grief into might: castable only while the Guardian lies fallen.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Four Elements</div>
