@@ -3180,36 +3180,37 @@ function ItemIcon({ slot, color, size = 18 }) {
 function HeroFig({ cls, camping, vowT }) {
   const c = CLASSES[cls];
   if (cls === "vowkeeper" && !camping) {
-    /* Drawn in SIDE PROFILE, facing the foe — a hooded keeper in a
-       floor-length robe, rendered as ONE CLOSED SILHOUETTE. No arms, no legs
-       and no weapon exist in this figure: at 46px any line that leaves the
-       body reads as a spike, so nothing leaves it. The hands are clasped
-       inside the robe at the front; the hem reaches the ground, because this
-       one never advances. */
+    /* STOICISM, drawn from scratch. A keeper seated in meditation on a stone
+       plinth: perfectly symmetric, weight low and wide, spine straight, head
+       level, eyes closed, hands folded in the lap. Nothing reaches, nothing
+       leans, nothing moves — while the world attacks, only the barrier answers.
+       All edges are straight and mitred; no limb leaves the silhouette. */
+    const lit = vowT > 0;
     return (
-      <svg className="herofig vowfig" width="46" height="52" viewBox="0 0 46 52" fill="none" stroke="#e8dcc3" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <circle
-          className={"vowsigils" + (vowT > 0 ? " vowlit" : "")}
-          cx="22" cy="26" r="17" stroke={c.color}
-          strokeWidth={vowT > 0 ? 1.9 : 1.3}
-          strokeDasharray="1.6 7"
-          opacity={vowT > 0 ? 0.95 : 0.45}
-        />
-        <g className="vowrobe">
-          {/* hood peak → brow → the fall of the robe → hem → back → back of hood */}
-          <path d="M21 5Q28 5.5 28.5 13L31 42q-9 3 -18 0L16.5 14Q15.5 5.5 21 5Z" fill="#161923" />
-          {/* the shadow inside the hood, set forward where the face looks out */}
-          <ellipse cx="25" cy="13.4" rx="2.9" ry="4" fill="#0b0d13" stroke="none" />
-          <path d="M26.4 13.1h1.2" stroke={c.color} strokeWidth="1.3" opacity="0.9" />
-          {/* cowl edge across the shoulders */}
-          <path d="M17.6 18.4q5.4-2.4 10.8-1" stroke={c.color} strokeWidth="1.4" opacity="0.8" />
-          {/* hands clasped at the front of the body — folded in, never reaching out */}
-          <path d="M23.8 23.4q2.6 1.4 3.4 3.4" strokeWidth="1.5" />
-          {/* sash, prayer beads, and the fall of the robe */}
-          <path d="M17.2 26q5.8 2 11.4 .4" stroke={c.color} strokeWidth="2" />
-          <path d="M26.6 28.4v3.9" stroke={c.color} strokeWidth="1.2" />
-          <circle cx="26.6" cy="33.3" r="1.1" stroke={c.color} strokeWidth="1.2" />
-          <path d="M20 29L18.6 40.6M24.6 29.2L25.2 40.8" strokeWidth="1.1" opacity="0.6" />
+      <svg className="herofig vowfig" width="46" height="52" viewBox="0 0 46 52" fill="none" stroke="#e8dcc3" strokeWidth="1.6" strokeLinecap="butt" strokeLinejoin="miter">
+        {/* the vow made visible — an even, faceted barrier, equal on every side */}
+        <g className={"vowshield" + (lit ? " vowlit" : "")} stroke={c.color} fill="none">
+          <path d="M23 5L40 15L40 35L23 45L6 35L6 15Z" strokeWidth={lit ? 1.6 : 1} opacity={lit ? 0.5 : 0.26} />
+          <path d="M40 15L40 35M6 15L6 35" strokeWidth={lit ? 2.6 : 1.7} opacity={lit ? 0.95 : 0.6} />
+        </g>
+        <g className="vowbody">
+          {/* stone plinth and the ground it will not leave */}
+          <path d="M9 44L37 44L37 47.4L9 47.4Z" fill="#141721" />
+          <path d="M5.5 48.4L40.5 48.4" strokeWidth="1.4" opacity="0.5" />
+          {/* crossed legs — a wide, low, immovable base */}
+          <path d="M13 35L33 35L34.5 44L11.5 44Z" fill="#1b1f2b" />
+          <path d="M15.4 41.4L18.6 37.8M30.6 41.4L27.4 37.8" strokeWidth="1.1" opacity="0.55" />
+          {/* hands folded in the lap */}
+          <path d="M19.8 36.4L26.2 36.4L25.2 39.6L20.8 39.6Z" fill="#101219" strokeWidth="1.3" />
+          {/* upright torso */}
+          <path d="M16.5 22.5L29.5 22.5L28.5 35L17.5 35Z" fill="#1b1f2b" />
+          <path d="M17 30L29 30" stroke={c.color} strokeWidth="1.9" />
+          <path d="M23 24.6L24.7 26.3L23 28L21.3 26.3Z" stroke={c.color} strokeWidth="1.2" />
+          {/* shoulders, squared and level */}
+          <path d="M16 17.5L30 17.5L31 22.5L15 22.5Z" fill="#1b1f2b" />
+          {/* helm, held level — and the closed line of the eyes */}
+          <path d="M23 6.5L27.8 10.5L27.2 17.5L18.8 17.5L18.2 10.5Z" fill="#1b1f2b" />
+          <path d="M20.4 12.7L25.6 12.7" stroke={c.color} strokeWidth="1.6" opacity={lit ? 1 : 0.8} />
         </g>
       </svg>
     );
@@ -5524,13 +5525,12 @@ const CSS = `
 .fighting .armF { animation: swing 0.6s ease-in-out infinite; transform-origin: 18px 19px; }
 @keyframes swing { 0%,100% { transform: rotate(6deg); } 35% { transform: rotate(-16deg); } }
 /* the Vow: no advance, no swing — the stance settles and the sigils turn */
-.fighting .heroSpot.vowstance { animation: brace 1.9s ease-in-out infinite; }
-@keyframes brace { 0%,100% { transform: translateY(0); } 50% { transform: translateY(1.5px); } }
-.vowfig .vowrobe { animation: vowbreathe 3.4s ease-in-out infinite; transform-origin: 22px 43px; }
-@keyframes vowbreathe { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(1.022); } }
-.vowfig .vowsigils { animation: vowturn 5.5s linear infinite; transform-origin: 22px 26px; }
-.vowfig .vowsigils.vowlit { animation-duration: 1.6s; filter: drop-shadow(0 0 4px currentColor); }
-@keyframes vowturn { to { transform: rotate(360deg); } }
+/* the Vowkeeper does not advance, does not swing, and does not sway — the
+   figure is dead still and the barrier alone reacts */
+.fighting .heroSpot.vowstance { animation: none; }
+.vowfig .vowshield { animation: shieldpulse 2.9s ease-in-out infinite; transform-origin: 22px 25px; }
+@keyframes shieldpulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+.vowfig .vowshield.vowlit { animation-duration: 1.1s; filter: drop-shadow(0 0 5px currentColor); }
 .heroSpot.fallen { transform: rotate(78deg) translate(8px,-4px); opacity: 0.7; animation: none; }
 .heroSpot.fallen .armF { animation: none; }
 .beastSpot { position: absolute; left: 58px; bottom: 2px; }
