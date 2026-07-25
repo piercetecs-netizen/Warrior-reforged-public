@@ -101,6 +101,7 @@ const DEF_CAP = 0.85;
 const defThreshold = (lvl) => 14 * Math.pow(1.05, lvl);
 const mitigation = (def, lvl, cap) => Math.min(cap || DEF_CAP, Math.max(0, def) / (Math.max(0, def) + defThreshold(lvl)));
 /* the point past which further DEF gives a quarter value (≈70% reduction) */
+/* superseded by defCeiling() — kept only so older references resolve */
 const defSoftCap = (g) => Math.round(2.33 * defThreshold(g.level));
 const capNote = {
   crit: "hard cap 100% — every point above is wasted",
@@ -439,7 +440,7 @@ const CLASSES = {
     name: "Necromancer", seal: "髅", color: "#8a7fb5",
     hp: 88, hpL: 16, atk: 12, atkL: 2.9, def: 3, defL: 0.5, crit: 9,
     blurb: "Death is a beginning, properly directed.",
-    passive: "Passive: RAISE THE DEAD — 35% of the time a slain foe rises to serve you (45% for elites, always for bosses), up to THREE at once. Each thrall strikes for 18% of your attack, but risen flesh rots: they lose 1.5% of their body each beat and crumble. Your own hand softens to 65% to feed them, so a lone necromancer is weak and a full pack is terrible. Grave chill still weakens survivors by 8%.",
+    passive: "Passive: RAISE THE DEAD — every foe you slay rises to serve you while the pack has room, up to THREE at once; against a lone boss, where no body falls until the end, the arena's older dead claw up instead. Each thrall strikes for 18% of your attack, but risen flesh rots: they lose 1.5% of their body each beat and crumble. Your own hand softens to 65% to feed them, so a lone necromancer is weak and a full pack is terrible. Grave chill still weakens survivors by 8%.",
   },
   spellblade: {
     name: "Spellblade", seal: "咒", color: "#5fc8be",
@@ -1481,7 +1482,7 @@ function forgeItem(t, slot, weights) {
    your whole build — but only if no OTHER worn piece already grants them. */
 const RANK_MULT = [1.6, 1.25, 1.0, 0.85];
 function statWeights(g) {
-  const base = { atk: 3, hp: 0.55, def: 2.2, crit: 14 };
+  const base = { atk: 3, hp: 0.55, def: 0.55, crit: 14 }; // def is priced in EHP, same unit as hp
   const fr = focusRanks(g);
   const w = {};
   for (const k in base) {
@@ -1490,15 +1491,33 @@ function statWeights(g) {
   }
   return w;
 }
+/* ---- what actually keeps you alive ----
+   Armor and vitality are MULTIPLICATIVE, not additive: a blow is reduced by
+   mitigation and then eaten by HP, so survivability is EFFECTIVE HP,
+   maxHp / (1 - mitigation). Pricing DEF as a flat per-point weight was wrong
+   in both directions at once — it under-sold armor while you were far from the
+   ceiling (each point is worth maxHp/threshold in EHP, which grows as you gain
+   HP), and it kept paying for armor past the ceiling, where a point is worth
+   exactly nothing. Both are now read straight off the real mitigation curve. */
+const defCapOf = (g) => (g.race === "terraborn" ? 0.9 : DEF_CAP);
+const guardEffOf = (g) => (g.cls === "berserker" ? 0.75 : 1);
+function ehpMult(g, def) {
+  const m = mitigation(def, g.level, defCapOf(g)) * guardEffOf(g);
+  return 1 / Math.max(0.05, 1 - m);
+}
+/* the DEF total past which mitigation is pinned at the ceiling and further
+   armor buys nothing at all */
+const defCeiling = (g) => {
+  const c = defCapOf(g);
+  return Math.round((c * defThreshold(g.level)) / Math.max(0.01, 1 - c));
+};
 // value of a stat point at the current total, respecting soft/hard caps
 function cappedGain(g, k, fromVal, addVal) {
-  const cap = k === "def" ? defSoftCap(g) : STAT_CAPS[k];
+  const cap = k === "def" ? defCeiling(g) : STAT_CAPS[k];
   if (cap == null) return addVal;
   if (k === "crit") { const room = Math.max(0, cap - fromVal); return Math.min(addVal, room); }
-  // def: linear to cap, then 25% effectiveness beyond
-  const under = Math.max(0, Math.min(addVal, cap - fromVal));
-  const over = addVal - under;
-  return under + over * 0.25;
+  // def: fully effective to the mitigation ceiling, then worth nothing
+  return Math.max(0, Math.min(addVal, cap - fromVal));
 }
 function procPoints(g, ids, exclSlot) {
   const have = new Set();
@@ -1549,7 +1568,12 @@ function bondPoints(g, refSt, w, eqMap) {
   }
   const defPts = cappedGain(g, "def", refSt.def, dPct * refSt.def);
   const critPts = cappedGain(g, "crit", refSt.crit, crit);
-  return aPct * refSt.atk * w.atk + hPct * refSt.maxHp * w.hp + defPts * w.def + critPts * w.crit;
+  const mB = ehpMult(g, refSt.def);
+  const mA = ehpMult(g, refSt.def + defPts);
+  return aPct * refSt.atk * w.atk
+    + hPct * refSt.maxHp * mA * w.hp
+    + refSt.maxHp * (mA - mB) * w.def
+    + critPts * w.crit;
 }
 function buildValue(g, it, slot) {
   if (!it) return 0;
@@ -1561,12 +1585,23 @@ function buildValue(g, it, slot) {
   const cur = g.eq[slot];
   const floorCrit = refSt.crit - (cur && cur.stats.crit || 0);
   const floorDef = refSt.def - (cur && cur.stats.def || 0);
+  const floorHp = Math.max(1, refSt.maxHp - (cur && cur.stats.hp || 0));
   let v = 0;
-  for (const k of ["atk", "hp", "def", "crit"]) {
+  for (const k of ["atk", "crit"]) {
     const raw = it.stats[k] || 0;
-    const eff = k === "crit" ? cappedGain(g, k, floorCrit, raw)
-      : k === "def" ? cappedGain(g, k, floorDef, raw) : raw;
+    const eff = k === "crit" ? cappedGain(g, k, floorCrit, raw) : raw;
     v += eff * w[k] * (k === "atk" ? wf : 1);
+  }
+  /* survivability, priced as the effective HP this piece actually adds:
+     HP is worth more the better your armor, and armor is worth more the more
+     HP it is protecting — and worth nothing once mitigation is pinned. */
+  {
+    const dAdd = cappedGain(g, "def", floorDef, it.stats.def || 0);
+    const hAdd = it.stats.hp || 0;
+    const mBefore = ehpMult(g, floorDef);
+    const mAfter = ehpMult(g, floorDef + dAdd);
+    v += hAdd * mAfter * w.hp;              // vitality, scaled by your armor
+    v += floorHp * (mAfter - mBefore) * w.def; // armor, scaled by your vitality
   }
   v += procPoints(g, itemProcs(it), slot);
   if (it.res) v += it.res.pct * refSt.maxHp * 0.08 * w.hp;
@@ -1834,14 +1869,16 @@ function rewardFoe(g, f, st) {
   if (g.cls === "necromancer") {
     g.graveChill = 3;
     if (!Array.isArray(g.minions)) g.minions = [];
+    /* every corpse serves — while the pack has room, a slain foe always rises.
+       The old dice refused two thirds of the bodies at your feet, which made the
+       pack feel like a boss-fight-only trick. Rot and the Life-Link toll remain
+       the real cost of fielding one. */
     if (g.minions.length < MINION_CAP) {
-      const odds = f.isBoss ? 1 : f.isElite ? 0.45 : 0.35;
-      if (Math.random() < odds) {
-        const mm = minionMaxOf(g, st);
-        g.minions = [...g.minions, { hp: mm, maxHp: mm, name: f.name.charCodeAt(0) > 0x2000 && f.name.includes(" ") ? f.name.slice(f.name.indexOf(" ") + 1) : f.name }];
-        pushLog(g, `${f.name} rises again — bound to your will (${g.minions.length}/${MINION_CAP}).`, "lvl");
-        if (g.minions.length === MINION_CAP) pushRibbon(g, "THE PACK IS FULL", "#8a7fb5");
-      }
+      const mm = minionMaxOf(g, st);
+      const bare = f.name.charCodeAt(0) > 0x2000 && f.name.includes(" ") ? f.name.slice(f.name.indexOf(" ") + 1) : f.name;
+      g.minions = [...g.minions, { hp: mm, maxHp: mm, name: bare }];
+      pushLog(g, `${f.name} rises again — bound to your will (${g.minions.length}/${MINION_CAP}).`, "lvl");
+      if (g.minions.length === MINION_CAP) pushRibbon(g, "THE PACK IS FULL", "#8a7fb5");
     }
   }
   if (g.cls === "ravager") g.rage = Math.min(100, (g.rage || 0) + 6);
@@ -2065,9 +2102,9 @@ function step(prev) {
   const linked = packOn && linkOn(g);
   if (packOn) {
     if (!Array.isArray(g.minions)) g.minions = [];
-    /* GRAVE-CALL — a boss fight is a field of older dead. While a boss stands
-       and the pack is short, the ground gives one up every few beats, so the
-       Necromancer's hero tax is never paid against an empty board. */
+    /* GRAVE-CALL — the one case where no body is available: a lone boss that
+       will not fall until the fight is over. The arena's older dead answer
+       instead, so the hero tax is never paid against an empty board. */
     const bossHere = (g.enemies || []).some((f2) => f2 && f2.isBoss && f2.hp > 0);
     if (bossHere && g.minions.length < MINION_CAP) {
       g.graveCall = (g.graveCall || 0) + 1;
@@ -4591,7 +4628,7 @@ function App() {
               <div className="guidetitle" style={{ marginTop: 8 }}>Steel, cloth and plate — what your school carries</div>
               <div className="tiny dim">Every weapon wounds in one of three ways — <b style={{ color: DAMAGE_CLASSES.slash.color }}>刃 Slash</b> (sword, saber, greatsword, glaive — a cutting polearm), <b style={{ color: DAMAGE_CLASSES.pierce.color }}>刺 Pierce</b> (daggers), <b style={{ color: DAMAGE_CLASSES.blunt.color }}>捶 Blunt</b> (staff, whisk, fists, maul) — and every school trains in some and refuses others. A Cleric keeps to staff and whisk and will not carry an edge; a Samurai answers only with the cut; a Ravager takes whatever is nearest. Training is permission; mastery (the green tag) is excellence atop it.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Worn armor has a WEIGHT, and weight decides the shape of its virtues: <b style={{ color: ARMOR_TYPES.robe.color }}>袍 Robe</b> spends shelter for power (−DEF −HP, +ATK +CRIT) · <b style={{ color: ARMOR_TYPES.light.color }}>轻 Light</b> stays swift and keen · <b style={{ color: ARMOR_TYPES.medium.color }}>中 Medium</b> balances · <b style={{ color: ARMOR_TYPES.heavy.color }}>重 Heavy</b> hoards shelter at the cost of edge. Totals stay close across the four — the trade is real, not a ladder. Weight applies to armor, helm, pauldrons, greaves, bracers, gloves and boots; trinkets, cloaks, belts and offhands are unweighted and open to all.</div>
-              <div className="tiny dim" style={{ marginTop: 4 }}>Armor turns a SHARE of every blow rather than shaving off a flat slab: reduction climbs as <b>DEF ÷ (DEF + a threshold that rises with the foe's level)</b>, capped at 85%. Armor therefore keeps pace with the whole journey and rewards every point invested, but never buys immunity — a heavier foe, an elite, a boss, and above all a boss's BREATH (which armor does not turn at all — only elemental resistance blunts it) all land proportionally harder. Your current figure sits on your stat sheet.</div>
+              <div className="tiny dim" style={{ marginTop: 4 }}>Armor turns a SHARE of every blow rather than shaving off a flat slab: reduction climbs as <b>DEF ÷ (DEF + a threshold that rises with the foe's level)</b>, capped at 85%. Armor therefore keeps pace with the whole journey and rewards every point invested, but never buys immunity — a heavier foe, an elite, a boss, and above all a boss's BREATH (which armor does not turn at all — only elemental resistance blunts it) all land proportionally harder. Your current figure sits on your stat sheet, along with the DEF total at which mitigation pins — armor bought past that ceiling does nothing at all. Gear valuation reads the same curve: because a blow is first reduced and then absorbed, what keeps you alive is EFFECTIVE HP (maxHp ÷ what gets through), so vitality is worth more the better your armor, armor is worth more the more vitality it protects, and armor past the ceiling is priced at zero.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Gear you were never trained for is tagged <b style={{ color: "#a86a6a" }}>untrained</b>: it will never be worn or auto-equipped, and waits in your pack or vault (sell it, or keep it for another life). The world knows this — most of what drops suits your school, but not all of it. Your training is listed on your stat sheet.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The long road — pacing &amp; the late game</div>
               <div className="tiny dim">The middle realms (5–55) climb steeply on purpose — that's where builds are forged, so each realm is lived in rather than blurred past. Beyond 55 the slope eases and MARQUEE kills carry you: Elites are worth +35% XP, bosses +50%. The world sharpens too: past 55, lesser foes may bear a war-omen — <b style={{ color: C.cinnabar }}>Frenzied</b> (harder, +25% XP) · <b style={{ color: C.storm }}>Bulwarked</b> (tougher, +40% gold) · <b style={{ color: C.violet }}>Voidtouched</b> (element-warded, +20% XP) · <b style={{ color: C.gilt }}>Gilded</b> (frail, gold ×2) · <b>Hollowed</b> (leaks 2精). Every boss rematch raises its HUNT RANK (to 10): it returns +10% stronger each rank but pays +5% XP, +3% relic chance, and better Eternal odds. And the Throne of Silence now ASCENDS — every 25 kills there, its foes gain +8% and its spoils +6%, forever. The end is a ladder, not a plateau.</div>
@@ -4601,7 +4638,7 @@ function App() {
               <div className="tiny dim">The Throne of Silence climbs forever: every 25 kills there raises ASCENSION, sharpening its foes by 8% and its spoils by 6% per tier. That climb is a <b>dial, not a ratchet</b> — step down at the Throne whenever it asks more than you can answer, hold it where it sits, or climb back when you are ready. Your highest reach is remembered regardless.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Understand what the late game rewards. Once foes fall below your level, XP is floored at 40% and a level costs hundreds of thousands — levelling is deliberately over. From there the compounding reward is <b>Reincarnation</b>: shed the life, keep an Echo for every 4 levels and 3 for every boss sealed, and every Echo grants +1% XP and gold and +0.5% to ALL stats in every future life, forever. A walled character is not a dead end; it is a full purse waiting to be spent.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Necromancer's pack</div>
-              <div className="tiny dim">A Necromancer fights through the dead. Slain foes rise to serve — 35% of the time, 45% from elites, always from a boss — up to <b>three</b> at once, each thrall striking for 18% of your attack. Your own hand softens to 65% to feed them, so a lone necromancer is feeble and a full pack is terrible. Risen flesh rots: every thrall sheds 1.5% of its body each beat and eventually crumbles, so the pack must be fed with fresh dead. Set them to the FRONT line and they meet blows in your place.</div>
+              <div className="tiny dim">A Necromancer fights through the dead. Every foe you slay rises to serve while the pack has room — no dice, a body is a body — up to <b>three</b> at once, each thrall striking for 18% of your attack. Against a lone boss no corpse falls until the fight ends, so there the ground itself gives up older dead every few beats instead. Your own hand softens to 65% to feed them, so a lone necromancer is feeble and a full pack is terrible. Risen flesh rots: every thrall sheds 1.5% of its body each beat and eventually crumbles, so the pack must be fed with fresh dead. Set them to the FRONT line and they meet blows in your place.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Three things wound a thrall, and only one is the Link: <b>rot</b> (1.5%/beat in battle, always — the pack row reads "rotting"); <b>front-line guarding</b> (髅guard floats — whole blows and boss breath, purely formation, woven or not); and the <b>Link's 35% share</b> (鎖link floats — only while Life-Link is woven, only on blows that reach YOU, so a front-lined pack never shows it). Unweave the Link and the 鎖 stops; the guarding and the rot were never its doing.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}><b style={{ color: "#8a7fb5" }}>Life-Link</b> is a STANCE, not a spell: no cooldown, never cast — it works whenever it is WOVEN and stops the instant you unweave it. While it holds, 35% of every blow you suffer is spread across the pack, your mending flows down the link to them, and each thrall carries +25% body. The binding cuts both ways: when a thrall crumbles, the snapping link burns you for 3% of your max HP. Sanguine gains — Leechfang, Lifedrink, Bloodkin's thirst, a Moonchild's crit-mending — count as mending, so while the Link holds they flow down it to the pack in equal measure. Companion classes are the deliberate exception: a beast or Guardian is mended by HEALING, never by the wielder's blood-pacts — lifesteal-sustained companions would let passive gear replace the active care those classes are built around.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>Companions &amp; formation</div>
@@ -5231,7 +5268,7 @@ function App() {
               <div>{cls.passive}</div>
               <div>Bloodline: {raceInfo.modText}</div>
               <div>Resist: {EL_KEYS.map((ek) => `${ELEMENTS[ek].glyph}${Math.round(playerRes(g, ek) * 100)}%`).join(" · ")}</div>
-              <div>Armor: turns {Math.round(mitigation(st.def, g.level, g.race === "terraborn" ? 0.9 : DEF_CAP) * 100)}% of each blow{mitigation(st.def, g.level, g.race === "terraborn" ? 0.9 : DEF_CAP) >= (g.race === "terraborn" ? 0.9 : DEF_CAP) ? " (at the ceiling)" : ` · comfort point ${fmt(defSoftCap(g))} DEF`}</div>
+              <div>Armor: turns {Math.round(mitigation(st.def, g.level, g.race === "terraborn" ? 0.9 : DEF_CAP) * 100)}% of each blow{mitigation(st.def, g.level, g.race === "terraborn" ? 0.9 : DEF_CAP) >= (g.race === "terraborn" ? 0.9 : DEF_CAP) ? " (at the ceiling)" : ` · ceiling at ${fmt(defCeiling(g))} DEF (${Math.round((st.def / Math.max(1, defCeiling(g))) * 100)}% there — armor past it is wasted)`}</div>
               <div>Harness: {openSlots(g).length}/{SLOT_KEYS.length} straps open{openSlots(g).length < SLOT_KEYS.length ? ` · next: ${SLOTS[SLOT_KEYS.filter((k) => !slotUnlocked(g, k))[0]].name} at ${slotReqText(SLOT_KEYS.filter((k) => !slotUnlocked(g, k))[0])}` : ""}</div>
               <div>Trained: {weaponsFor(g.cls).map((k) => DAMAGE_CLASSES[k].glyph + DAMAGE_CLASSES[k].name).join(" · ")} │ {armorsFor(g.cls).map((k) => ARMOR_TYPES[k].glyph + ARMOR_TYPES[k].name).join(" · ")}</div>
               {isPackClass(g) && (
