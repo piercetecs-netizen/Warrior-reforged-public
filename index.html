@@ -458,7 +458,7 @@ const CLASSES = {
     name: "Vowkeeper", seal: "誓", color: "#d8c9a0",
     hp: 135, hpL: 25, atk: 9, atkL: 2.2, def: 5, defL: 1.0, crit: 4,
     blurb: "Raises no hand — and needs none.",
-    passive: "Passive: the Vow — you never strike, and no weapon will do it for you. All aggression offered in a beat is gathered and answered ONCE: a shockwave to every foe worth 75% ATK + 130% of the harm answered. A ward blunts the answer as it blunts the blow — harm swallowed by a shield still rings out, but at 40%. Aggression digs its own grave.",
+    passive: "Passive: the Vow — you never strike, and no weapon will do it for you. All aggression offered in a beat is gathered and answered ONCE: a shockwave to every foe worth 75% ATK + 50% of every blow OFFERED to you — measured raw, before armor, resistance or ward touch it. Every shelter you raise is therefore free: defence protects you without costing you a single point of answer. Aggression digs its own grave.",
   },
   chronomancer: {
     name: "Chronomancer", seal: "时", color: "#8fb5c8",
@@ -492,10 +492,10 @@ const RACES = {
   starborn: { name: "Starborn", seal: "星", color: "#b0a0e0", blurb: "Old light, patient and vast.", mods: { xp: 1.12, crit: 2 }, modText: "+12% XP · +2% CRIT · fated: Echoes are earned 20% faster on reincarnation" },
   bloodkin: { name: "Bloodkin", seal: "血", color: "#b53545", blurb: "The hunger is old and honest.", mods: { atk: 1.13, hp: 0.94, crit: 1 }, modText: "+13% ATK · +1% CRIT · −6% HP · sanguine: 10% on hit to drink 2% max HP" },
   voidborn: { name: "Voidborn", seal: "虚", color: "#7a6fb0", blurb: "Born of the space between stars.", mods: { atk: 1.08, crit: 4, hp: 0.96 }, modText: "+8% ATK · +4% CRIT · −4% HP · unmaking: +10% damage to every foe in a pack" },
-  ashborn: { name: "Ashborn", seal: "烬", color: "#e0562f", blurb: "The pyre remembers its children.", mods: { atk: 1.06 }, modText: "+6% ATK · fire resist 25% · ember: +10% of every strike burns as FIRE" },
-  deepborn: { name: "Deepborn", seal: "渊", color: "#5fa8c8", blurb: "Pressure is just an embrace.", mods: { hp: 1.1 }, modText: "+10% HP · water resist 25% · stillwater: +1% HP regen at camp" },
-  stormtouched: { name: "Stormtouched", seal: "霆", color: "#7aa2d8", blurb: "Struck once, changed forever.", mods: { crit: 3 }, modText: "+3% CRIT · storm resist 25% · quickened: +0.05 strike speed" },
-  terraborn: { name: "Terraborn", seal: "岳", color: "#b08d4f", blurb: "The mountain claims its own.", mods: { def: 1.1 }, modText: "+10% DEF · earth resist 25% · bedrock: your armor ceiling rises to 90%" },
+  ashborn: { name: "Ashborn", seal: "烬", color: "#e0562f", blurb: "The pyre remembers its children.", mods: { atk: 1.06 }, modText: "+6% ATK · fire resist 25% · 7% against all others · ember: +10% of every strike burns as FIRE" },
+  deepborn: { name: "Deepborn", seal: "渊", color: "#5fa8c8", blurb: "Pressure is just an embrace.", mods: { hp: 1.1 }, modText: "+10% HP · water resist 25% · 7% against all others · stillwater: +1% HP regen at camp" },
+  stormtouched: { name: "Stormtouched", seal: "霆", color: "#7aa2d8", blurb: "Struck once, changed forever.", mods: { crit: 3 }, modText: "+3% CRIT · storm resist 25% · 7% against all others · quickened: +0.05 strike speed" },
+  terraborn: { name: "Terraborn", seal: "岳", color: "#b08d4f", blurb: "The mountain claims its own.", mods: { def: 1.1 }, modText: "+10% DEF · earth resist 25% · 7% against all others · bedrock: your armor ceiling rises to 90%" },
 };
 
 /* past lives: who you were before the road */
@@ -514,10 +514,10 @@ const BACKGROUNDS = {
   pilgrim: { name: "Road Pilgrim", seal: "逓", blurb: "Raised with faith and blistered feet.", passive: "Rested XP bonus lasts 50% longer and grants +35% instead of +25%.", startGold: 30 },
   outcast: { name: "Branded Outcast", seal: "叛", blurb: "Raised with a mark and a grudge.", passive: "+6% ATK and −10% HP — all grudge, no guard. Starts with no gold.", startGold: 0 },
   veteran: { name: "Arena Veteran", seal: "鬥", blurb: "Raised on sand and the roar of crowds.", passive: "Kill streaks build gold 50% faster (bonus caps sooner).", startGold: 50 },
-  pyre: { name: "Pyre Tender", seal: "焚", blurb: "Raised feeding the eternal flame.", passive: "Fire resist 15% · +15% FIRE damage dealt · starts with 5 Spirit Essence.", startGold: 20 },
-  tide: { name: "Tide Priest", seal: "潮", blurb: "Raised where the sea prays back.", passive: "Water resist 15% · +15% WATER damage dealt · rises from defeat 1 beat sooner.", startGold: 20 },
-  rod: { name: "Lightning Rod", seal: "引", blurb: "Raised on the tallest hill, on purpose.", passive: "Storm resist 15% · +15% STORM damage dealt · kills pay +5% gold.", startGold: 20 },
-  quarry: { name: "Quarry Child", seal: "采", blurb: "Raised swinging at stone.", passive: "Earth resist 15% · +15% EARTH damage dealt · bosses yield +1 material.", startGold: 20 },
+  pyre: { name: "Pyre Tender", seal: "焚", blurb: "Raised feeding the eternal flame.", passive: "Fire resist 15% (and 5% against every other element) · +15% FIRE damage dealt · starts with 5 Spirit Essence.", startGold: 20 },
+  tide: { name: "Tide Priest", seal: "潮", blurb: "Raised where the sea prays back.", passive: "Water resist 15% (and 5% against every other element) · +15% WATER damage dealt · rises from defeat 1 beat sooner.", startGold: 20 },
+  rod: { name: "Lightning Rod", seal: "引", blurb: "Raised on the tallest hill, on purpose.", passive: "Storm resist 15% (and 5% against every other element) · +15% STORM damage dealt · kills pay +5% gold.", startGold: 20 },
+  quarry: { name: "Quarry Child", seal: "采", blurb: "Raised swinging at stone.", passive: "Earth resist 15% (and 5% against every other element) · +15% EARTH damage dealt · bosses yield +1 material.", startGold: 20 },
 };
 
 // aoe skills strike every foe in a pack
@@ -1254,10 +1254,12 @@ function eqProcs(g) {
 }
 /* player's total resistance to an element: gear wards + bloodline + past life,
    capped at 75% — you can blunt the wheel, never escape it entirely. */
-const RACE_RES = { ashborn: { fire: 0.25 }, deepborn: { water: 0.25 }, stormtouched: { storm: 0.25 }, terraborn: { earth: 0.25 } };
+const RACE_RES = { ashborn: { fire: 0.25, all: 0.07 }, deepborn: { water: 0.25, all: 0.07 }, stormtouched: { storm: 0.25, all: 0.07 }, terraborn: { earth: 0.25, all: 0.07 } };
 /* past lives that alter the body itself — applied in calcStats alongside bloodlines */
 const BG_MODS = { outcast: { atk: 1.06, hp: 0.9 } };
-const BG_RES = { pyre: { fire: 0.15 }, tide: { water: 0.15 }, rod: { storm: 0.15 }, quarry: { earth: 0.15 } };
+/* an elemental past life wards its own element strongly and every other a
+   little — a specialist, never a dead card in the wrong zone */
+const BG_RES = { pyre: { fire: 0.15, all: 0.05 }, tide: { water: 0.15, all: 0.05 }, rod: { storm: 0.15, all: 0.05 }, quarry: { earth: 0.15, all: 0.05 } };
 /* a past life spent tending one element sharpens it: +15% to damage you deal
    of that element (skills, infusions and the Ashborn ember alike) */
 const BG_EL = { pyre: "fire", tide: "water", rod: "storm", quarry: "earth" };
@@ -1270,8 +1272,9 @@ function playerRes(g, el) {
     const it = g.eq[k];
     if (it && it.res && it.res.el === el) r += it.res.pct;
   }
-  r += (RACE_RES[g.race] && RACE_RES[g.race][el]) || 0;
-  r += (BG_RES[g.bg] && BG_RES[g.bg][el]) || 0;
+  const rr = RACE_RES[g.race], br = BG_RES[g.bg];
+  if (rr) r += rr[el] || rr.all || 0;
+  if (br) r += br[el] || br.all || 0;
   return Math.min(0.75, r);
 }
 
@@ -1296,7 +1299,13 @@ const ETERNALS = [
 function makeFoe(g, kind) {
   const z = ZONES[g.zone];
   const last = g.zone === ZONES.length - 1;
-  let lvl = last ? Math.max(z.lv[0], g.level + ri(-1, 3)) : ri(z.lv[0], z.lv[1]);
+  /* THE THRONE no longer chases the traveller's LEVEL. It used to, which meant
+     every level gained made its foes ~7.5% stronger and the hero ~0.5% stronger
+     — levelling was net negative and a character could level itself into a wall
+     it could never answer. The endless zone now climbs on ASCENSION alone, the
+     dial the traveller sets, so levelling helps everywhere and the difficulty is
+     chosen rather than inflicted. */
+  let lvl = last ? ri(z.lv[0], z.lv[1]) + (g.ascension || 0) * 2 : ri(z.lv[0], z.lv[1]);
   lvl = clamp(lvl, 1, 150) + (kind === "boss" ? 2 : 0);
   const v = rnd(0.85, 1.15);
   let hp = eHp(lvl) * v, atk = eAtk(lvl) * v;
@@ -1412,7 +1421,7 @@ function newGame(cls, name, race = "human", bg = "farmhand") {
     echoes: 0, rebirths: 0,
     vault: [], runes: {}, pendingUpgrades: [],
     rage: 0, chrono: 0, pet: null, minions: [], formation: "front", openSeen: ["weapon", "armor"], forgeLog: [],
-    ascension: 0, ascHigh: 0, ascCap: null, throneKills: 0, huntRank: ZONES.map(() => 0),
+    ascension: 0, ascHigh: 0, ascCap: null, holdLevel: false, throneKills: 0, huntRank: ZONES.map(() => 0),
     loadoutIdx: 0, loadouts: [null, null, null],
     loadoutFocus: [null, null, null],
     savedAt: Date.now(),
@@ -1952,8 +1961,8 @@ function rewardFoe(g, f, st) {
     applyDrop(g, makeItem(t));
   }
 
-  // level ups — a surge of power, marked with ceremony
-  while (g.xp >= xpNeed(g.level)) {
+  // level ups — a surge of power, marked with ceremony (held levels bank instead)
+  while (!g.holdLevel && g.xp >= xpNeed(g.level)) {
     g.xp -= xpNeed(g.level);
     const before = calcStats(g);
     const formBefore = g.cls === "beastcaller" ? beastForm(g.level).name : null;
@@ -2726,12 +2735,12 @@ function step(prev) {
   let vowHarm = 0;
   /* The Vow gathers ALL the aggression offered this beat and answers it once,
      rather than once per striker — otherwise a pack of six punished itself
-     thirty-six times over. Harm swallowed by a ward still rings out, but at
-     40%: shelter is shelter, not free force. */
-  const vowTake = (incoming, absorbed) => {
-    if (g.cls !== "vowkeeper" || !(incoming > 0)) return;
-    const warded = Math.min(absorbed || 0, incoming);
-    vowHarm += (incoming - warded) + warded * 0.4;
+     thirty-six times over. It measures the blow AS OFFERED — the raw swing,
+     before armor, resistance or ward touch it — so no shelter you raise ever
+     costs you an ounce of answer. */
+  const vowTake = (offered) => {
+    if (g.cls !== "vowkeeper" || !(offered > 0)) return;
+    vowHarm += offered * 0.5;
   };
   const vowAnswer = () => {
     if (g.cls !== "vowkeeper" || vowHarm <= 0 || !foes.length) return;
@@ -2755,7 +2764,13 @@ function step(prev) {
         f.bsN = (f.bsN || 0) + 1;
         if (f.bsN % 2 === 1) {
           const bel = f.el || "fire";
-          let bd2 = Math.max(1, Math.round(f.atk * 2.2 * rnd(0.9, 1.1) * (1 - playerRes(g, bel))));
+          const bOffered = Math.max(1, Math.round(f.atk * 2.2 * rnd(0.9, 1.1)));
+          vowTake(bOffered);
+          let bd2 = Math.max(1, Math.round(bOffered * (1 - playerRes(g, bel))));
+          /* the breath can maim but never erase: no single breath takes more
+             than 60% of a full pool, so it is always survivable once and lethal
+             if you stand in a second without mending. */
+          bd2 = Math.min(bd2, Math.max(1, Math.round(st.maxHp * 0.6)));
           if (packOn && livingMinions(g).length && g.formation !== "back") {
             const tgtM = livingMinions(g)[0];
             tgtM.hp -= bd2;
@@ -2766,10 +2781,8 @@ function step(prev) {
             fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息 −" + fmt(bd2), crit: true, side: "beast" });
             if (g.pet.hp <= 0) { g.pet.hp = 0; g.pet.downT = 10; pushRibbon(g, petCfg.kind === "guardian" ? "THE GUARDIAN FALLS" : "YOUR BEAST FALLS", C.cinnabar); pushLog(g, "Your companion is struck down — it will return, in time.", "boss"); }
           } else {
-            const bIn = bd2;
             let bAbs = 0;
             if (b.shield > 0) { bAbs = Math.min(b.shield, bd2); b.shield -= bAbs; bd2 -= bAbs; }
-            vowTake(bIn, bAbs);
             if (bd2 > 0) { g.hp -= bd2; g.hurtLastTick = true; }
             fx.push({ id: floatSeq++, text: ELEMENTS[bel].glyph + "息 −" + fmt(Math.max(0, bd2)), crit: true, side: "player" });
           }
@@ -2807,7 +2820,9 @@ function step(prev) {
       }
       continue;
     }
-    let edmg = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15) * (1 - mitigation(st.def * heroDefEff, f.lvl, g.race === "terraborn" ? 0.9 : DEF_CAP) * guardEff) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.86 : 1)));
+    const offered = Math.max(1, Math.round(f.atk * slowed * rnd(0.85, 1.15)));
+    vowTake(offered);
+    let edmg = Math.max(1, Math.round(offered * (1 - mitigation(st.def * heroDefEff, f.lvl, g.race === "terraborn" ? 0.9 : DEF_CAP) * guardEff) * (g.race === "golemborn" ? 0.92 : 1) * (g.bg === "soldier" && (f.isElite || f.inPack) ? 0.86 : 1)));
     if (f.el) edmg = Math.max(1, Math.round(edmg * (1 - playerRes(g, f.el))));
     if (linked) {
       const alive = livingMinions(g);
@@ -2821,7 +2836,6 @@ function step(prev) {
         }
       }
     }
-    const incoming = edmg;
     let absorbed = 0;
     if (b.shield > 0) {
       absorbed = Math.min(b.shield, edmg);
@@ -2829,7 +2843,6 @@ function step(prev) {
       edmg -= absorbed;
       if (edmg <= 0) fx.push({ id: floatSeq++, text: "⛨ warded", crit: false, side: "player" });
     }
-    vowTake(incoming, absorbed);
     if (edmg > 0) {
       g.hp -= edmg;
       g.hurtLastTick = true;
@@ -2947,7 +2960,7 @@ function applyOffline(g) {
   g.materials[MATS[mi].key] += mats;
   const preLevel = g.level;
   let levels = 0;
-  while (g.xp >= xpNeed(g.level)) {
+  while (!g.holdLevel && g.xp >= xpNeed(g.level)) {
     g.xp -= xpNeed(g.level);
     g.level += 1;
     levels += 1;
@@ -3047,6 +3060,7 @@ function migrate(raw) {
   g.ascension = Math.max(0, raw.ascension | 0);
   g.ascHigh = Math.max(g.ascension, raw.ascHigh | 0);
   g.ascCap = raw.ascCap == null ? null : Math.max(0, raw.ascCap | 0);
+  g.holdLevel = !!raw.holdLevel;
   g.throneKills = Math.max(0, raw.throneKills | 0);
   g.huntRank = ZONES.map((_, i) => clamp((Array.isArray(raw.huntRank) ? raw.huntRank[i] : 0) | 0, 0, 10));
   g.pet = raw.pet && typeof raw.pet === "object" ? { hp: Math.max(0, Math.round(raw.pet.hp || 0)), downT: Math.max(0, raw.pet.downT || 0) } : null;
@@ -3723,6 +3737,41 @@ function App() {
       pushLog(g, `The rite concludes: ${item.name} (${RARITIES[item.rarity].name}).`, "lvl");
       const r = applyDrop(g, item);
       if (item.mw && r !== "melt") pushSplash(g, "MASTERWORK", item.name, C.gilt);
+      return g;
+    });
+
+  const raiseTier = () =>
+    forgeMutate((g) => {
+      const it = g.eq[forgeSlot];
+      if (!it) { pushLog(g, "Nothing is equipped in that slot.", "sys"); return g; }
+      const target = g.zone + 1;
+      if (it.tier >= target) { pushLog(g, `${it.name} is already forged for this realm.`, "sys"); return g; }
+      const im = MATS[matIdxForTier(it.tier + 1)];
+      const matCost = 4;
+      const essCost = 6;
+      const goldCost = Math.round(150 * costScale(it.tier + 1) * (g.bg === "smith" ? 0.85 : 1) * (g.race === "ironkin" ? 0.88 : 1));
+      if ((g.materials[im.key] || 0) < matCost || (g.essence || 0) < essCost || g.gold < goldCost) {
+        pushLog(g, `Raising the metal asks ${matCost}× ${im.name}, ${essCost}精 and ${fmt(goldCost)} gold.`, "sys");
+        return g;
+      }
+      g.materials[im.key] -= matCost; g.essence -= essCost; g.gold -= goldCost;
+      /* stats grow by the same tier step the world uses, so a raised piece
+         matches a fresh drop of its rarity — no better, no worse */
+      const step = 1.5;
+      const ns = {};
+      for (const k in it.stats) ns[k] = k === "crit" ? +(it.stats[k] * 1.08).toFixed(1) : Math.max(1, Math.round(it.stats[k] * step));
+      const nit = { ...it, tier: it.tier + 1, stats: ns, value: Math.round((it.value || 1) * step) };
+      g.eq = { ...g.eq, [forgeSlot]: nit };
+      pushLog(g, `The metal is raised: ${it.name} is reforged to tier ${nit.tier}.`, "lvl");
+      return g;
+    });
+
+  const toggleHoldLevel = () =>
+    mutate((g) => {
+      g.holdLevel = !g.holdLevel;
+      pushLog(g, g.holdLevel
+        ? "You hold your level. Experience banks until you choose to spend it."
+        : "You let your level climb again.", "sys", "skills");
       return g;
     });
 
@@ -4685,6 +4734,7 @@ function App() {
               <div className="guidetitle" style={{ marginTop: 8 }}>How skills choose their moment</div>
               <div className="tiny dim">Woven skills no longer fire the instant they're ready — they wait for the moment they matter. Sustain casts on NEED (heals when you or your companion are hurt — Berserkers cling to their wounds far longer, since bloodrage feeds on them); buffs recast only once the old one fades; running afflictions aren't clobbered; shields aren't stacked onto a full ward. DPS respects the target: great nukes hold when a basic strike would finish common prey (Elites and bosses always merit them), and grand AOE waits for a pack — or a boss — rather than one straggler. A skill whose element the foe wholly NULLS (a boss facing its own element) is held rather than cast for zero — the weave leans on neutral and off-element work until the immunity passes. Nothing ever burns a cooldown into empty air, though shields and mending may be laid between waves. Rage runs its own economy: the Ravager reserves 60+ rage finishers for worthy prey — but at 90+ rage it DUMPS freely, because capped rage is rage wasted. A held skill costs nothing: no cooldown, no rage.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Throne, and what the late game pays</div>
+              <div className="tiny dim">The Throne climbs on <b>ASCENSION alone</b> — never on your level. Its foes stand two levels higher per tier you have chosen to hold, so levelling always helps you and the difficulty is something you set rather than something that happens to you. You may also <b>hold your level</b> from the Training panel: experience banks untouched until you release it, for when a realm outpaces your gear. And a boss's BREATH can maim but never erase — no single breath takes more than 60% of a full pool, so it is always survivable once and lethal if you stand in a second without mending.</div>
               <div className="tiny dim">The Throne of Silence climbs forever: every 25 kills there raises ASCENSION, sharpening its foes by 8% and its spoils by 6% per tier. That climb is a <b>dial, not a ratchet</b> — step down at the Throne whenever it asks more than you can answer, hold it where it sits, or climb back when you are ready. Your highest reach is remembered regardless.</div>
               <div className="tiny dim" style={{ marginTop: 4 }}>Understand what the late game rewards. Once foes fall below your level, XP is floored at 40% and a level costs hundreds of thousands — levelling is deliberately over. From there the compounding reward is <b>Reincarnation</b>: shed the life, keep an Echo for every 4 levels and 3 for every boss sealed, and every Echo grants +1% XP and gold and +0.5% to ALL stats in every future life, forever. A walled character is not a dead end; it is a full purse waiting to be spent.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Necromancer's pack</div>
@@ -4990,6 +5040,14 @@ function App() {
                 </div>
                 <div className="mono tiny dim">{itemStatText(g.eq[forgeSlot])}</div>
               </div>
+              {g.eq[forgeSlot].tier < g.zone + 1 && (
+                <div className="forgerow">
+                  <span className="mono tiny dim">Raise the metal — tier {g.eq[forgeSlot].tier} → {g.eq[forgeSlot].tier + 1} (of {g.zone + 1})</span>
+                  <button className="btn tiny" style={{ borderColor: C.gilt }} onClick={raiseTier}>
+                    +50% stats · 4× {MATS[matIdxForTier(g.eq[forgeSlot].tier + 1)].name.split(" ")[0]} + 6精 + {fmt(craftGold(150 * costScale(g.eq[forgeSlot].tier + 1)))}g
+                  </button>
+                </div>
+              )}
               {(g.eq[forgeSlot].temper || 0) >= 5 ? (
                 <span className="mono tiny" style={{ color: C.gilt }}>honed</span>
               ) : (
@@ -5128,6 +5186,19 @@ function App() {
                 <div key={l.id} className={"forgeline " + (l.kind || "sys")}>{l.msg}</div>
               ))
             )}
+          </div>
+          <div className="sectionlabel" style={{ marginTop: 12 }}>The pace of your becoming</div>
+          <div className="tiny dim">
+            Hold your level and experience banks instead of spending itself. Useful when a realm's foes climb with you
+            and your gear has not yet caught up — nothing is lost, and the moment you release it every banked level lands at once.
+          </div>
+          <div className="focusrow" style={{ marginTop: 4 }}>
+            <button className={"chip" + (g.holdLevel ? " on" : "")} onClick={toggleHoldLevel}>
+              {g.holdLevel ? `⏸ holding at ${g.level}` : "let levels climb"}
+            </button>
+            <span className="mono tiny dim" style={{ alignSelf: "center" }}>
+              {fmt(g.xp)} / {fmt(xpNeed(g.level))} XP{g.holdLevel && g.xp >= xpNeed(g.level) ? " · a level waits" : ""}
+            </span>
           </div>
           <TabLog g={g} chan="skills" title="Training Record" empty="Nothing yet — training, mastery and weave changes land here." />
         </div>
