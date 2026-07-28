@@ -1392,7 +1392,7 @@ function killTime(g) {
 function newGame(cls, name, race = "human", bg = "farmhand") {
   return {
     v: SAVE_VER,
-    cls, name: name || "Wanderer",
+    cls, name: name || "Wanderer", tale: "", epithet: "",
     race, bg,
     level: 1, xp: 0, gold: (BACKGROUNDS[bg] && BACKGROUNDS[bg].startGold) || 0,
     hp: CLASSES[cls].hp,
@@ -1418,6 +1418,8 @@ function newGame(cls, name, race = "human", bg = "farmhand") {
     lifetimeKills: 0,
     streak: 0,
     bounty: null, bountyCd: 0,
+    road: { step: ZONES.map(() => 0), mark: 0, elites: 0 },
+    seenZone: ZONES.map((_, i) => i === 0),
     echoes: 0, rebirths: 0,
     vault: [], runes: {}, pendingUpgrades: [],
     rage: 0, chrono: 0, pet: null, minions: [], formation: "front", openSeen: ["weapon", "armor"], forgeLog: [],
@@ -1868,6 +1870,7 @@ function rewardFoe(g, f, st) {
   bumpBounty(g, "kills");
   g.vigor = Math.max(0, g.vigor - 0.35 * (g.bg === "farmhand" ? 0.75 : 1));
   if (!f.isBoss) g.kills[g.zone] += 1;
+  if (f.isElite && g.road) g.road.elites = (g.road.elites || 0) + 1;
   const cut = sc < 1 ? ` (trivial −${Math.round((1 - sc) * 100)}%)` : "";
   pushLog(g, `${f.name} falls. +${fmt(xpGain)} XP${cut}, +${fmt(goldGain)} gold.`, f.isBoss ? "boss" : "kill");
   if (g.cls === "taoist") g.hp = Math.min(st.maxHp, g.hp + Math.round(st.maxHp * 0.04));
@@ -2083,6 +2086,8 @@ function step(prev) {
   }
   // ceremony hold: the world pauses while any announcement is on screen
   if (g.splash || g.lvlfx) return g;
+
+  roadCheck(g);
 
   // the bounty board never stays bare for long
   if (!g.bounty) g.bounty = newBounty(g);
@@ -3061,7 +3066,10 @@ function migrate(raw) {
   g.ascHigh = Math.max(g.ascension, raw.ascHigh | 0);
   g.ascCap = raw.ascCap == null ? null : Math.max(0, raw.ascCap | 0);
   g.holdLevel = !!raw.holdLevel;
+  g.tale = raw.tale || heroTale(cls, g.race, g.bg);
+  g.epithet = raw.epithet || heroEpithet(g.race, g.bg);
   g.coachOff = !!raw.coachOff;
+  g.seenZone = ZONES.map((_, i) => (raw.seenZone ? !!raw.seenZone[i] : i <= (raw.maxZone || 0)));
   g.throneKills = Math.max(0, raw.throneKills | 0);
   g.huntRank = ZONES.map((_, i) => clamp((Array.isArray(raw.huntRank) ? raw.huntRank[i] : 0) | 0, 0, 10));
   g.pet = raw.pet && typeof raw.pet === "object" ? { hp: Math.max(0, Math.round(raw.pet.hp || 0)), downT: Math.max(0, raw.pet.downT || 0) } : null;
@@ -3085,6 +3093,15 @@ function migrate(raw) {
   g.kills = ZONES.map((_, i) => (raw.kills && raw.kills[i]) || 0);
   g.bossDown = ZONES.map((_, i) => !!(raw.bossDown && raw.bossDown[i]));
   g.bossMeter = ZONES.map((_, i) => (raw.bossMeter && raw.bossMeter[i]) || 0);
+  g.road = {
+    step: ZONES.map((_, i) => {
+      const v = raw.road && raw.road.step && raw.road.step[i];
+      /* a realm already conquered has walked its road */
+      return typeof v === "number" ? clamp(v, 0, ROAD[i].length) : (raw.bossDown && raw.bossDown[i] ? ROAD[i].length : 0);
+    }),
+    mark: (raw.road && raw.road.mark) || 0,
+    elites: (raw.road && raw.road.elites) || 0,
+  };
   g.materials = { ...base.materials, ...(raw.materials || {}) };
   g.essence = Math.max(0, Math.round(raw.essence || 0));
   /* retired skill ids map to their successors; anything unknown is dropped so
@@ -3283,6 +3300,177 @@ const FIG_SIGIL = {
    for someone who has not played a minute yet. So every class now declares how
    demanding it is to pilot, and names the lineage that flatters it, and a
    newcomer can take a proven opening in one tap instead of guessing. */
+/* ---------------- The Road — a chain of tasks per realm ----------------
+   A traveller used to wander a realm hoping its warden would happen to appear.
+   Now every realm sets three plain tasks: blood the ground, prove yourself, then
+   face the warden — and finishing the second SUMMONS the warden rather than
+   leaving it to chance. The last task opens the next road, so the way forward is
+   always written down somewhere the player can read it. */
+const ROAD = ZONES.map((z, i) => {
+  const need = 12 + i * 5;
+  const eliteNeed = 1 + Math.floor(i / 3);
+  const lvNeed = Math.max(2, z.lv[1] - 2);
+  return [
+    { kind: "slay", n: need, title: `Blood the ${z.name}`, note: `Slay ${need} of what walks here.` },
+    i % 2 === 0
+      ? { kind: "elite", n: eliteNeed, title: "Cull the strong", note: `Fell ${eliteNeed} elite${eliteNeed > 1 ? "s" : ""} in this realm.` }
+      : { kind: "level", n: lvNeed, title: "Come of age", note: `Reach level ${lvNeed}.` },
+    { kind: "boss", title: `Face ${z.boss}`, note: "The warden walks. End it, and the road opens." },
+  ];
+});
+const roadStepOf = (g) => (g.road && g.road.step && g.road.step[g.zone]) || 0;
+function roadProgress(g) {
+  const s = roadStepOf(g);
+  const task = ROAD[g.zone][s];
+  if (!task) return { task: null, have: 0, need: 0, done: true };
+  if (task.kind === "slay") return { task, have: Math.max(0, g.kills[g.zone] - (g.road.mark || 0)), need: task.n };
+  if (task.kind === "elite") return { task, have: g.road.elites || 0, need: task.n };
+  if (task.kind === "level") return { task, have: g.level, need: task.n };
+  return { task, have: g.bossDown[g.zone] ? 1 : 0, need: 1 };
+}
+/* advance the chain, hand out the purse, and call the warden when it is earned */
+function roadCheck(g) {
+  if (!g.road || !g.road.step) return;
+  const z = g.zone;
+  let s = g.road.step[z];
+  if (s >= ROAD[z].length) return;
+  const p = roadProgress(g);
+  if (p.task && p.have >= p.need) {
+    g.road.step[z] = s + 1;
+    g.road.mark = g.kills[z];
+    g.road.elites = 0;
+    const purse = Math.round(120 * costScale(z + 1));
+    g.gold += purse;
+    g.essence = (g.essence || 0) + 1 + Math.floor(z / 3);
+    pushLog(g, `Road of ${ZONES[z].name} — "${p.task.title}" is done. +${fmt(purse)} gold, +${1 + Math.floor(z / 3)}精.`, "lvl", "zones");
+    const next = ROAD[z][s + 1];
+    if (next) {
+      pushLog(g, `Next: ${next.title} — ${next.note}`, "sys", "zones");
+      if (next.kind === "boss") pushRibbon(g, "THE WARDEN STIRS", C.cinnabar);
+    } else {
+      pushRibbon(g, "THE ROAD IS WALKED", C.jade);
+    }
+  }
+  /* while the warden's task stands, it is always available — no waiting on dice */
+  if (g.road.step[z] === ROAD[z].length - 1 && !g.bossDown[z] && !g.camping && g.dead === 0) {
+    g.bossPending = true;
+  }
+}
+
+/* ---------------- the telling ----------------
+   Seven thousand two hundred openings, and none of them should read like a form
+   letter. A life is composed, not templated: where the body came from, what the
+   hands did before, the hinge that turned, and what was taken up after. Each
+   part has two tellings, the halves can trade places, and one of six hinges
+   joins them — so a given hero always reads the same way, and two heroes rarely
+   read alike. */
+const TELL_ORIGIN = {
+  human: ["You were born in an ordinary year, to people who kept no records.", "Nothing marked your birth but the weather, and that only mildly."],
+  stoneborn: ["You came out heavy, and the midwife said so out loud.", "Your people are quarried more than born, and you were no exception."],
+  foxkin: ["You were born laughing, which the elders took as a warning.", "Foxkin arrive knowing one secret already; nobody agrees which."],
+  spiritborn: ["You were born twice — the second time was quieter.", "Something followed you out of the birthing room and never left."],
+  dragonblood: ["There is a furnace somewhere far back in your line, still lit.", "Your blood runs a degree too hot for any physician's liking."],
+  moonchild: ["You were born under a full moon and have never quite trusted daylight.", "The tides were wrong the night you came, and stayed wrong a week."],
+  emberkin: ["You were born in ash country, and it got into your lungs early.", "Your first memory is heat, and it has never entirely left you."],
+  golemborn: ["Something was built into you before you could object.", "Your bones ring faintly when struck, which you learned not to demonstrate."],
+  seafolk: ["You were born within sound of water and have never slept well without it.", "The sea had a claim on you before anyone else did."],
+  sunborn: ["You were born at noon and cast a shorter shadow than you should.", "Light has always liked you more than is strictly reasonable."],
+  frostkin: ["You were born in a cold that killed the livestock and spared you.", "Winter took an interest in you early and never quite let go."],
+  windborn: ["You were born in transit and have never fully arrived anywhere.", "Your people do not build doors, only openings."],
+  ironkin: ["You were born in a forge town where every child learns the same song.", "Your first toy was a nail, and you still prefer things that hold."],
+  starborn: ["You were born the night the sky did something unrepeatable.", "Astronomers argued about the year of your birth. They still do."],
+  bloodkin: ["You were born hungry in a way food never fixed.", "Your line has an old arrangement with something, and it is still in force."],
+  voidborn: ["You were born in a silence the room took a long while to fill.", "There is a small absence at the centre of you, and it has always been there."],
+  ashborn: ["You were born the year the mountain spoke, and you have its temper.", "Ash fell on your cradle and nobody thought to brush it off."],
+  deepborn: ["You were born below the light line, where pressure teaches patience.", "Your first breath was cold saltwater, and you remember disliking it."],
+  stormtouched: ["Lightning found you once, early, and left something behind.", "You were struck as a child and came back with a different opinion of the sky."],
+  terraborn: ["You were born under stone, and the mountain has considered you kin since.", "The ground has never once shifted under you, which is not normal."],
+};
+const TELL_PAST = {
+  farmhand: ["You worked a field until your hands stopped blistering and simply hardened.", "You spent years learning that most things grow if you leave them alone."],
+  orphan: ["You were raised by a temple that fed you in exchange for silence.", "You grew up among people paid to be kind, and learned to tell the difference."],
+  merchant: ["You spent years pricing other people's desperation, and got good at it.", "You learned the roads by hauling other men's goods along them."],
+  deserter: ["You put down a banner you had sworn to carry, and ran.", "You walked away from a line that was about to break, and lived."],
+  smith: ["You spent your youth at an anvil, learning what metal will and will not forgive.", "You made things that outlasted the men who bought them."],
+  tracker: ["You made your living reading ground that other people just walked on.", "You spent years following things that did not wish to be followed."],
+  noble: ["You were raised in a house with a name older than its money.", "You learned early that a title is mostly a debt in nicer clothing."],
+  scholar: ["You spent your best years in a library, and regret only some of them.", "You read your way through a hundred lives before living your own."],
+  hermit: ["You went up a mountain to be alone, and mostly succeeded.", "You spent a long silence learning what you actually thought."],
+  gambler: ["You lived off odds, and the odds mostly tolerated it.", "You learned that luck is real, unreliable, and worth courting anyway."],
+  soldier: ["You held a line for people who never learned your name.", "You were a soldier long enough to stop finding it interesting."],
+  pilgrim: ["You walked to a holy place and found the walking was the point.", "You spent years on the road toward something you never quite reached."],
+  outcast: ["You were marked and turned out, and have carried the grudge carefully since.", "A village decided what you were, and you have been arguing ever since."],
+  veteran: ["You survived a war that ended without anybody winning.", "You came home from a campaign that nobody commemorates."],
+  pyre: ["In a life before this one you tended a fire that was never allowed to go out.", "You have knelt at a pyre before — you remember the heat, not the year."],
+  tide: ["In a life before this one you kept a harbour light through bad seasons.", "You have drowned once already, and it left an odd calm behind."],
+  rod: ["In a life before this one you stood on a roof holding iron in a storm, on purpose.", "You were the one who called the lightning down, and it came."],
+  quarry: ["In a life before this one you broke stone until the stone knew you.", "You have cut a mountain apart before, slowly, and it taught you patience."],
+};
+const TELL_CALL = {
+  warrior:     ["So you learned the plain arts: stand, strike, stand again.", "You took up a blade because it asked the fewest questions."],
+  mage:        ["So you learned to make the world reconsider its own rules.", "You went looking for power that did not require permission."],
+  taoist:      ["So you learned to move with things rather than against them.", "You took up the balanced way, which is harder than it sounds."],
+  blademaster: ["So you learned to hold two blades and answer with both.", "You went looking for a form fast enough to keep up with you."],
+  beastcaller: ["So you found something wild that agreed to walk beside you.", "You learned the older bargain, the one struck with teeth and trust."],
+  monk:        ["So you learned to make a weapon of an empty hand.", "You took up a discipline that begins by taking everything away."],
+  shadow:      ["So you learned to arrive late, quietly, and decisively.", "You took up the work that is done before anyone looks up."],
+  sentinel:    ["So you learned to be the thing that does not move.", "You took up the shield, which is a promise more than a tool."],
+  ranger:      ["So you learned to end things at a distance you chose.", "You took up the bow and the long patient wait behind it."],
+  berserker:   ["So you learned to trade your own blood for a moment of terrible speed.", "You stopped defending yourself, and found it worked better."],
+  warlock:     ["So you signed something you have not fully read.", "You took the fastest road to power and did not ask its price."],
+  cleric:      ["So you learned to keep others standing, which is its own violence.", "You took up mending, and found the world had a great deal that needed it."],
+  samurai:     ["So you learned the single cut, and everything that comes before it.", "You took up a discipline where the draw matters more than the blade."],
+  druid:       ["So you learned to borrow shapes from things that never needed words.", "You took up the green work, which keeps its own slow calendar."],
+  necromancer: ["So you learned to ask the dead for help, and to be answered.", "You took up the unpopular study and stopped apologising for it."],
+  spellblade:  ["So you learned to put a spell along an edge and swing it.", "You refused to choose between the blade and the book."],
+  ravager:     ["So you learned to let the fury run, and to aim it.", "You took up the work that rewards momentum over caution."],
+  vowkeeper:   ["So you swore never to strike first, and meant it.", "You took a vow to raise no hand — and let the world break itself against you."],
+  chronomancer:["So you learned to spend moments you have not lived yet.", "You took up the study of when, which is stranger than where."],
+  stormcaller: ["So you learned to call the sky down and stand under it.", "You took up the loud work, and have never once regretted the noise."],
+};
+const TELL_HINGE = [
+  "Then the road turned, as roads do.",
+  "It might have stayed that way. It did not.",
+  "Something ended that year — you have never said what.",
+  "Then you were owed an answer nobody would give you.",
+  "One season it stopped being enough.",
+  "Then you were left standing where a life used to be.",
+];
+const TELL_EPI_R = { human: "Plain-Born", stoneborn: "Quarry-Set", foxkin: "Sly-Footed", spiritborn: "Twice-Born", dragonblood: "Ember-Veined", moonchild: "Moon-Touched", emberkin: "Ash-Marked", golemborn: "Iron-Made", seafolk: "Tide-Sworn", sunborn: "Sun-Bright", frostkin: "Winter-Kept", windborn: "Wind-Loose", ironkin: "Forge-Fast", starborn: "Star-Noted", bloodkin: "Blood-Bound", voidborn: "Hollow-Hearted", ashborn: "Cinder-Born", deepborn: "Deep-Held", stormtouched: "Storm-Struck", terraborn: "Mountain-Kin" };
+const TELL_EPI_B = { farmhand: "Fieldwalker", orphan: "Foundling", merchant: "Roadwise", deserter: "Oathbreaker", smith: "Anvilhand", tracker: "Pathreader", noble: "Highborn", scholar: "Late Reader", hermit: "Silence-Keeper", gambler: "Long Shot", soldier: "Linesman", pilgrim: "Far Walker", outcast: "Branded", veteran: "Last Survivor", pyre: "Flamewatch", tide: "Lightkeeper", rod: "Skycaller", quarry: "Stonebreaker" };
+const tellHash = (a, b, c, salt) => {
+  const s = a + "|" + b + "|" + c + "|" + salt;
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+};
+function heroTale(cls, race, bg) {
+  const O = (TELL_ORIGIN[race] || TELL_ORIGIN.human)[tellHash(cls, race, bg, "o") % 2];
+  const P = (TELL_PAST[bg] || TELL_PAST.farmhand)[tellHash(cls, race, bg, "p") % 2];
+  const C2 = (TELL_CALL[cls] || TELL_CALL.warrior)[tellHash(cls, race, bg, "c") % 2];
+  const H = TELL_HINGE[tellHash(cls, race, bg, "h") % TELL_HINGE.length];
+  const flip = tellHash(cls, race, bg, "f") % 2 === 1;
+  const head = flip ? `${P} ${O}` : `${O} ${P}`;
+  return `${head} ${H} ${C2}`;
+}
+const heroEpithet = (race, bg) => `${TELL_EPI_R[race] || "Plain-Born"} ${TELL_EPI_B[bg] || "Fieldwalker"}`;
+
+/* first sight of a realm — written once per realm, spoken only the first time */
+const ZONE_FIRST = [
+  "Grass to the knee and nothing watching you yet. It will not stay this quiet.",
+  "The trees close overhead and the road stops pretending to be a road.",
+  "Cold air off old stone. Somebody buried a great many people here, carefully.",
+  "The ground gives up heat through your boots. Nothing green has grown here in an age.",
+  "The pass narrows and the wind starts taking an interest in you personally.",
+  "Water where water should not be, holding up rooms that were never meant to be seen.",
+  "The keep does not announce itself. You simply notice you have been inside it a while.",
+  "The sky is wrong here — too many edges, and light arriving from the wrong side.",
+  "Sound stops carrying. You can hear your own blood, which is not an improvement.",
+  "You are walking on nothing, above everything, and it holds.",
+  "Hammerfall you can feel in the teeth. Something enormous is still being made here.",
+  "Nothing speaks. Nothing has spoken here for a very long time, and it is waiting to see if you will.",
+];
+
 const CLASS_PATH = {
   warrior:     { tier: 1, race: "bloodkin",    bg: "soldier",  why: "Strike, endure, repeat. Nothing to manage." },
   ranger:      { tier: 1, race: "moonchild",   bg: "hermit",   why: "High crit, simple rotation, safe at range." },
@@ -3386,7 +3574,8 @@ function nextStep(g) {
   if (g.inv.length) return { tab: "gear", text: `${g.inv.length} item${g.inv.length > 1 ? "s" : ""} waiting in your pack — Gear tab.`, why: "Equip what beats what you wear; sell the rest." };
   if (trainable.length && !g.training) return { tab: "skills", text: `${trainable[0].name} is ready to learn — Training tab.`, why: "Training runs while you camp." };
   if (g.level >= 6 && !(g.forgeLog || []).length) return { tab: "forge", text: "Visit the Forge — tempering makes worn gear stronger.", why: "Every piece can be honed five times." };
-  if (g.level >= 10 && g.maxZone === 0) return { tab: "zones", text: "Fell the realm boss to open the next road — Realms tab.", why: "Each realm holds better spoils than the last." };
+  const rp = roadProgress(g);
+  if (rp.task) return { tab: "zones", text: `${rp.task.title} — ${rp.task.note}`, why: "The Road of this realm ends with its warden, and that opens the next." };
   return null;
 }
 
@@ -3567,6 +3756,9 @@ function App() {
   const start = (ovCls, ovRace, ovBg) => {
     const useCls = ovCls || pickCls, useRace = ovRace || pickRace, useBg = ovBg || pickBg;
     const g = newGame(useCls, heroName.trim(), useRace, useBg);
+    g.tale = heroTale(useCls, useRace, useBg);
+    g.epithet = heroEpithet(useRace, useBg);
+    pushLog(g, g.tale, "lvl", "battle");
     g.echoes = carry.echoes || 0;
     g.rebirths = carry.rebirths || 0;
     if (useBg === "orphan") {
@@ -3821,7 +4013,16 @@ function App() {
       g.zone = idx;
       g.enemies = null;
       g.bossPending = false;
-      pushLog(g, `You travel to ${ZONES[idx].name}.`, "sys");
+      if (g.road) { g.road.mark = g.kills[idx]; g.road.elites = 0; }
+      pushLog(g, `You travel to ${ZONES[idx].name}.`, "sys", "zones");
+      if (!g.seenZone) g.seenZone = [];
+      if (!g.seenZone[idx]) {
+        g.seenZone[idx] = true;
+        pushLog(g, ZONE_FIRST[idx] || "", "lvl", "zones");
+        pushSplash(g, ZONES[idx].name.toUpperCase(), ZONE_FIRST[idx] || "", C.jade);
+      }
+      const rp = roadProgress(g);
+      if (rp.task) pushLog(g, `The road here: ${rp.task.title} — ${rp.task.note}`, "sys", "zones");
       return g;
     });
 
@@ -4419,6 +4620,13 @@ function App() {
         </div>
         <div className="pickblurb tiny dim">{BACKGROUNDS[pickBg].blurb} · {BACKGROUNDS[pickBg].passive}</div>
 
+        <div className="taleblock">
+          <div className="sectionlabel" style={{ marginTop: 0 }}>
+            Your telling
+            <span className="mono tiny" style={{ float: "right", color: C.gilt }}>{heroEpithet(pickRace, pickBg)}</span>
+          </div>
+          <div className="taletext">{heroTale(pickCls, pickRace, pickBg)}</div>
+        </div>
         <div className="namerow">
           <input
             className="nameinput"
@@ -4521,6 +4729,7 @@ function App() {
           <Seal char={cls.seal} color={cls.color} size={40} />
           <div className="hudinfo">
             <div className="heroname">{g.name}</div>
+            {g.epithet && <div className="heroepi mono">{g.epithet}</div>}
             <div className="herosub mono">{cls.name} · Lv {g.level} · {realmOf(g.level)}</div>
           </div>
         </div>
@@ -4908,6 +5117,11 @@ function App() {
               <div className="tiny dim">The middle realms (5–55) climb steeply on purpose — that's where builds are forged, so each realm is lived in rather than blurred past. Beyond 55 the slope eases and MARQUEE kills carry you: Elites are worth +35% XP, bosses +50%. The world sharpens too: past 55, lesser foes may bear a war-omen — <b style={{ color: C.cinnabar }}>Frenzied</b> (harder, +25% XP) · <b style={{ color: C.storm }}>Bulwarked</b> (tougher, +40% gold) · <b style={{ color: C.violet }}>Voidtouched</b> (element-warded, +20% XP) · <b style={{ color: C.gilt }}>Gilded</b> (frail, gold ×2) · <b>Hollowed</b> (leaks 2精). Every boss rematch raises its HUNT RANK (to 10): it returns +10% stronger each rank but pays +5% XP, +3% relic chance, and better Eternal odds. And the Throne of Silence now ASCENDS — every 25 kills there, its foes gain +8% and its spoils +6%, forever. The end is a ladder, not a plateau.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>How skills choose their moment</div>
               <div className="tiny dim">Woven skills no longer fire the instant they're ready — they wait for the moment they matter. Sustain casts on NEED (heals when you or your companion are hurt — Berserkers cling to their wounds far longer, since bloodrage feeds on them); buffs recast only once the old one fades; running afflictions aren't clobbered; shields aren't stacked onto a full ward. DPS respects the target: great nukes hold when a basic strike would finish common prey (Elites and bosses always merit them), and grand AOE waits for a pack — or a boss — rather than one straggler. A skill whose element the foe wholly NULLS (a boss facing its own element) is held rather than cast for zero — the weave leans on neutral and off-element work until the immunity passes. Nothing ever burns a cooldown into empty air, though shields and mending may be laid between waves. Rage runs its own economy: the Ravager reserves 60+ rage finishers for worthy prey — but at 90+ rage it DUMPS freely, because capped rage is rage wasted. A held skill costs nothing: no cooldown, no rage.</div>
+              <div className="guidetitle" style={{ marginTop: 0 }}>Your telling</div>
+              <div className="tiny dim" style={{ fontStyle: "italic", lineHeight: 1.55 }}>{g.tale}</div>
+              <div className="tiny" style={{ color: C.gilt, marginTop: 3 }}>{g.name} the {g.epithet} · {CLASSES[g.cls].name} of the {RACES[g.race].name} line</div>
+              <div className="guidetitle" style={{ marginTop: 8 }}>The Road — how a realm opens</div>
+              <div className="tiny dim">Every realm sets three tasks, listed at the top of the Realms tab: <b>blood the ground</b> (slay its foes), <b>prove yourself</b> (fell its elites, or come of age), then <b>face the warden</b>. Finishing the second task <b>summons the warden</b> — it will find you, and you never wait on chance for it again. Felling it opens the next road. Each task pays gold and essence as you complete it, and a realm you have already conquered counts its road as walked.</div>
               <div className="guidetitle" style={{ marginTop: 8 }}>The Throne, and what the late game pays</div>
               <div className="tiny dim">The Throne climbs on <b>ASCENSION alone</b> — never on your level. Its foes stand two levels higher per tier you have chosen to hold, so levelling always helps you and the difficulty is something you set rather than something that happens to you. You may also <b>hold your level</b> from the Training panel: experience banks untouched until you release it, for when a realm outpaces your gear. And a boss's BREATH can maim but never erase — no single breath takes more than 60% of a full pool, so it is always survivable once and lethal if you stand in a second without mending.</div>
               <div className="tiny dim">The Throne of Silence climbs forever: every 25 kills there raises ASCENSION, sharpening its foes by 8% and its spoils by 6% per tier. That climb is a <b>dial, not a ratchet</b> — step down at the Throne whenever it asks more than you can answer, hold it where it sits, or climb back when you are ready. Your highest reach is remembered regardless.</div>
@@ -5423,6 +5637,43 @@ function App() {
 
       {tab === "zones" && (
         <div className="pane">
+          {(() => {
+            const s = roadStepOf(g);
+            const p = roadProgress(g);
+            const done = s >= ROAD[g.zone].length;
+            return (
+              <div className="roadcard">
+                <div className="sectionlabel" style={{ marginTop: 0 }}>
+                  The Road of {ZONES[g.zone].name}
+                  <span className="mono tiny dim" style={{ float: "right" }}>{Math.min(s, ROAD[g.zone].length)}/{ROAD[g.zone].length}</span>
+                </div>
+                {ROAD[g.zone].map((t, i) => {
+                  const state = i < s ? "done" : i === s ? "now" : "later";
+                  return (
+                    <div key={i} className={"roadstep " + state}>
+                      <span className="roadmark">{state === "done" ? "✔" : state === "now" ? "▸" : "·"}</span>
+                      <span className="roadbody">
+                        <span className="roadtitle">{t.title}</span>
+                        {state !== "later" && <span className="roadnote tiny dim"> — {t.note}</span>}
+                        {state === "now" && p.task && (
+                          <span className="mono tiny" style={{ color: C.gilt, marginLeft: 4 }}>
+                            {t.kind === "level" ? `level ${g.level}/${p.need}` : `${fmt(Math.min(p.have, p.need))}/${fmt(p.need)}`}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+                {done ? (
+                  <div className="tiny" style={{ color: C.jade, marginTop: 3 }}>
+                    This road is walked{g.zone < ZONES.length - 1 ? " — the way onward is open." : "."}
+                  </div>
+                ) : ROAD[g.zone][s].kind === "boss" ? (
+                  <div className="tiny" style={{ color: C.cinnabar, marginTop: 3 }}>The warden walks these grounds now — it will find you.</div>
+                ) : null}
+              </div>
+            );
+          })()}
           {ZONES.map((zn, i) => {
             const locked = i > g.maxZone;
             const here = i === g.zone;
@@ -5843,6 +6094,20 @@ const CSS = `
 .pathwhy { color: #8b93a7; margin-top: 3px; line-height: 1.4; }
 .pickhint { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   background: #12141c; border: 1px solid #2a2f3d; border-radius: 4px; padding: 7px 9px; margin-top: 12px; }
+.taleblock { background: #12141c; border: 1px solid #2a2f3d; border-radius: 4px;
+  padding: 9px 11px 10px; margin-top: 14px; }
+.taletext { font-size: 12.5px; line-height: 1.62; color: #b8b29c; font-style: italic; }
+.heroepi { font-size: 9.5px; color: ${C.gilt}; opacity: 0.85; letter-spacing: 0.06em; margin-top: 1px; }
+.roadcard { background: #12141c; border: 1px solid #2a2f3d; border-left: 3px solid ${C.gilt};
+  border-radius: 4px; padding: 8px 10px 9px; margin-bottom: 10px; }
+.roadstep { display: flex; gap: 6px; align-items: flex-start; padding: 2px 0; line-height: 1.35; }
+.roadstep.later { opacity: 0.42; }
+.roadmark { width: 11px; flex: none; color: ${C.dim}; font-size: 11px; }
+.roadstep.done .roadmark { color: ${C.jade}; }
+.roadstep.now .roadmark { color: ${C.gilt}; }
+.roadbody { flex: 1; min-width: 0; font-size: 12px; }
+.roadstep.done .roadtitle { color: ${C.dim}; text-decoration: line-through; }
+.roadstep.now .roadtitle { color: ${C.bone}; }
 .coach { display: flex; align-items: center; gap: 8px; background: #14181f;
   border: 1px solid ${C.gilt}55; border-left: 3px solid ${C.gilt}; border-radius: 4px;
   padding: 8px 10px; margin-bottom: 8px; position: relative; }
