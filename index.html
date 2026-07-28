@@ -3191,66 +3191,145 @@ function ItemIcon({ slot, color, size = 18 }) {
   );
 }
 
+/* ---------------- hero figures: one construction for all twenty ----------------
+   Every class is drawn to the same rules, the ones the Vowkeeper established:
+     · ONE CLOSED SILHOUETTE — no arm, leg or weapon ever leaves the body, because
+       at 46px any line that exits the outline reads as a spike;
+     · STRAIGHT EDGES, MITRED CORNERS — nothing curves, so nothing goes ghostly;
+     · GROUNDED — every figure meets a ground line, nothing floats;
+     · SOLID, not a stick — filled plates with an ink outline;
+     · a faceted barrier in the class colour, which is the only moving part.
+   A class differs by STANCE (how it stands), CROWN (what it wears) and SIGIL
+   (what is struck into its chest) — composed from the kit below, never hand-drawn,
+   so a new class inherits the whole discipline for free. */
+const FIG_STANCE = {
+  /* wide, low and immovable — the ones who hold a line */
+  planted: (
+    <>
+      <path d="M14.5 34L21 34L20.2 45.6L13.4 45.6Z" fill="#101219" />
+      <path d="M25 34L31.5 34L32.6 45.6L25.8 45.6Z" fill="#101219" />
+      <path d="M13.5 21L32.5 21L31.2 34.4L14.8 34.4Z" fill="#1b1f2b" />
+      <path d="M12.4 15.6L33.6 15.6L34.6 21.4L11.4 21.4Z" fill="#1b1f2b" />
+    </>
+  ),
+  /* narrow and coiled — the ones who move first */
+  poised: (
+    <>
+      <path d="M16.4 33L21.4 33L19.8 45.6L14.2 45.6Z" fill="#101219" />
+      <path d="M24.8 33L29.8 33L31.6 45.6L26 45.6Z" fill="#101219" />
+      <path d="M16.2 20.6L29.8 20.6L28.8 33.4L17.2 33.4Z" fill="#1b1f2b" />
+      <path d="M15.4 15.8L30.6 15.8L31.4 21L14.6 21Z" fill="#1b1f2b" />
+    </>
+  ),
+  /* a robe to the floor — the ones who do not need to step */
+  robed: (
+    <>
+      <path d="M16.6 20.4L29.4 20.4L34.2 45.6L11.8 45.6Z" fill="#1b1f2b" />
+      <path d="M19.6 24L18.4 45.4M26.4 24L27.6 45.4" strokeWidth="1" opacity="0.5" />
+      <path d="M15.6 15.6L30.4 15.6L31 20.8L15 20.8Z" fill="#1b1f2b" />
+    </>
+  ),
+  /* seated on stone — the ones the world moves around */
+  seated: (
+    <>
+      <path d="M9 44L37 44L37 47.4L9 47.4Z" fill="#141721" />
+      <path d="M13 35L33 35L34.5 44L11.5 44Z" fill="#1b1f2b" />
+      <path d="M15.4 41.4L18.6 37.8M30.6 41.4L27.4 37.8" strokeWidth="1.1" opacity="0.55" />
+      <path d="M19.8 36.4L26.2 36.4L25.2 39.6L20.8 39.6Z" fill="#101219" strokeWidth="1.3" />
+      <path d="M16.5 22.5L29.5 22.5L28.5 35L17.5 35Z" fill="#1b1f2b" />
+      <path d="M16 17.5L30 17.5L31 22.5L15 22.5Z" fill="#1b1f2b" />
+    </>
+  ),
+};
+const FIG_CROWN = {
+  helm: (col, lit) => (
+    <>
+      <path d="M23 5.6L28.4 9.8L27.8 15.8L18.2 15.8L17.6 9.8Z" fill="#1b1f2b" />
+      <path d="M19.8 11.6L26.2 11.6" stroke={col} strokeWidth="1.7" opacity={lit ? 1 : 0.85} />
+    </>
+  ),
+  hood: (col, lit) => (
+    <>
+      <path d="M23 4.8L29.2 10.4L28.4 15.8L17.6 15.8L16.8 10.4Z" fill="#161923" />
+      <path d="M19.4 12.4L21.4 12.4M24.6 12.4L26.6 12.4" stroke={col} strokeWidth="1.5" opacity={lit ? 1 : 0.8} />
+    </>
+  ),
+  band: (col, lit) => (
+    <>
+      <path d="M18.4 6.4L27.6 6.4L27.6 15.8L18.4 15.8Z" fill="#1b1f2b" />
+      <path d="M17.8 9.2L28.2 9.2" stroke={col} strokeWidth="2" opacity={lit ? 1 : 0.9} />
+      <path d="M20.6 12.6L25.4 12.6" strokeWidth="1.3" opacity="0.7" />
+    </>
+  ),
+  horned: (col, lit) => (
+    <>
+      <path d="M23 5.2L28.6 9.4L28 15.8L18 15.8L17.4 9.4Z" fill="#1b1f2b" />
+      <path d="M17.4 9.4L14.8 6.6L18.6 7.2ZM28.6 9.4L31.2 6.6L27.4 7.2Z" fill="#1b1f2b" />
+      <path d="M19.8 11.8L26.2 11.8" stroke={col} strokeWidth="1.7" opacity={lit ? 1 : 0.9} />
+    </>
+  ),
+};
+const FIG_SIGIL = {
+  diamond: "M23 24.4L25 26.6L23 28.8L21 26.6Z",
+  bar: "M19.6 25.4L26.4 25.4L26.4 27.6L19.6 27.6Z",
+  wedge: "M23 24L26.2 28.6L19.8 28.6Z",
+  square: "M20.8 25L25.2 25L25.2 29L20.8 29Z",
+  cross: "M22 24L24 24L24 26L26 26L26 28L24 28L24 30L22 30L22 28L20 28L20 26L22 26Z",
+};
+/* stance · crown · sigil per class — the whole roster on one page */
+const FIG = {
+  warrior:     ["planted", "helm",   "bar"],
+  sentinel:    ["planted", "helm",   "square"],
+  berserker:   ["planted", "horned", "wedge"],
+  ravager:     ["planted", "horned", "wedge"],
+  samurai:     ["poised",  "horned", "diamond"],
+  blademaster: ["poised",  "band",   "diamond"],
+  shadow:      ["poised",  "hood",   "wedge"],
+  ranger:      ["poised",  "hood",   "wedge"],
+  spellblade:  ["poised",  "band",   "diamond"],
+  mage:        ["robed",   "hood",   "diamond"],
+  warlock:     ["robed",   "horned", "diamond"],
+  necromancer: ["robed",   "hood",   "cross"],
+  chronomancer:["robed",   "band",   "diamond"],
+  stormcaller: ["robed",   "band",   "wedge"],
+  beastcaller: ["poised",  "horned", "square"],
+  cleric:      ["robed",   "band",   "cross"],
+  druid:       ["robed",   "hood",   "square"],
+  taoist:      ["robed",   "band",   "diamond"],
+  monk:        ["seated",  "band",   "bar"],
+  vowkeeper:   ["seated",  "helm",   "diamond"],
+};
+
 function HeroFig({ cls, camping, vowT }) {
-  const c = CLASSES[cls];
-  if (cls === "vowkeeper" && !camping) {
-    /* STOICISM, drawn from scratch. A keeper seated in meditation on a stone
-       plinth: perfectly symmetric, weight low and wide, spine straight, head
-       level, eyes closed, hands folded in the lap. Nothing reaches, nothing
-       leans, nothing moves — while the world attacks, only the barrier answers.
-       All edges are straight and mitred; no limb leaves the silhouette. */
-    const lit = vowT > 0;
-    return (
-      <svg className="herofig vowfig" width="46" height="52" viewBox="0 0 46 52" fill="none" stroke="#e8dcc3" strokeWidth="1.6" strokeLinecap="butt" strokeLinejoin="miter">
-        {/* the vow made visible — an even, faceted barrier, equal on every side */}
-        <g className={"vowshield" + (lit ? " vowlit" : "")} stroke={c.color} fill="none">
-          <path d="M23 5L40 15L40 35L23 45L6 35L6 15Z" strokeWidth={lit ? 1.6 : 1} opacity={lit ? 0.5 : 0.26} />
-          <path d="M40 15L40 35M6 15L6 35" strokeWidth={lit ? 2.6 : 1.7} opacity={lit ? 0.95 : 0.6} />
-        </g>
-        <g className="vowbody">
-          {/* stone plinth and the ground it will not leave */}
-          <path d="M9 44L37 44L37 47.4L9 47.4Z" fill="#141721" />
-          <path d="M5.5 48.4L40.5 48.4" strokeWidth="1.4" opacity="0.5" />
-          {/* crossed legs — a wide, low, immovable base */}
-          <path d="M13 35L33 35L34.5 44L11.5 44Z" fill="#1b1f2b" />
-          <path d="M15.4 41.4L18.6 37.8M30.6 41.4L27.4 37.8" strokeWidth="1.1" opacity="0.55" />
-          {/* hands folded in the lap */}
-          <path d="M19.8 36.4L26.2 36.4L25.2 39.6L20.8 39.6Z" fill="#101219" strokeWidth="1.3" />
-          {/* upright torso */}
-          <path d="M16.5 22.5L29.5 22.5L28.5 35L17.5 35Z" fill="#1b1f2b" />
-          <path d="M17 30L29 30" stroke={c.color} strokeWidth="1.9" />
-          <path d="M23 24.6L24.7 26.3L23 28L21.3 26.3Z" stroke={c.color} strokeWidth="1.2" />
-          {/* shoulders, squared and level */}
-          <path d="M16 17.5L30 17.5L31 22.5L15 22.5Z" fill="#1b1f2b" />
-          {/* helm, held level — and the closed line of the eyes */}
-          <path d="M23 6.5L27.8 10.5L27.2 17.5L18.8 17.5L18.2 10.5Z" fill="#1b1f2b" />
-          <path d="M20.4 12.7L25.6 12.7" stroke={c.color} strokeWidth="1.6" opacity={lit ? 1 : 0.8} />
-        </g>
-      </svg>
-    );
-  }
+  const c = CLASSES[cls] || CLASSES.warrior;
+  const [stance, crown, sigil] = FIG[cls] || FIG.warrior;
   if (camping) {
+    /* at rest the barrier is down and the figure sits by the fire */
     return (
-      <svg className="herofig" width="44" height="52" viewBox="0 0 44 52" fill="none" stroke="#e8dcc3" strokeWidth="2" strokeLinecap="round">
-        <circle cx="22" cy="17" r="5" />
-        <path d="M22 22v8M22 30l-8 8M22 30l8 8M14 38h16" />
-        <path d="M14 29q8-6 16 0" stroke={c.color} strokeWidth="2.4" />
+      <svg className="herofig" width="46" height="52" viewBox="0 0 46 52" fill="none" stroke="#e8dcc3" strokeWidth="1.6" strokeLinecap="butt" strokeLinejoin="miter">
+        <path d="M9 44L37 44L37 47.4L9 47.4Z" fill="#141721" />
+        <path d="M5.5 48.4L40.5 48.4" strokeWidth="1.4" opacity="0.5" />
+        <path d="M14 35L32 35L33.4 44L12.6 44Z" fill="#1b1f2b" />
+        <path d="M17.5 22L28.5 22L27.6 35L18.4 35Z" fill="#1b1f2b" />
+        <path d="M17 17.6L29 17.6L29.8 22.4L16.2 22.4Z" fill="#1b1f2b" />
+        {FIG_CROWN[crown](c.color, false)}
+        <path d="M17.6 28.4L28.4 28.4" stroke={c.color} strokeWidth="1.8" opacity="0.8" />
       </svg>
     );
   }
+  const lit = cls === "vowkeeper" && vowT > 0;
   return (
-    <svg className="herofig" width="46" height="52" viewBox="0 0 46 52" fill="none" stroke="#e8dcc3" strokeWidth="2" strokeLinecap="round">
-      <circle cx="18" cy="10" r="5" />
-      <path d="M18 15v15M18 30l-6 14M18 30l8 12M18 18l-7 8" />
-      <path d="M12 20q6-6 14-2" stroke={c.color} strokeWidth="2.4" />
-      <g className="armF">
-        <path d="M18 19l10 3" />
-        {weapon === "sword" && <path d="M28 22l9-9M35.5 14.5l3-1-1 3z" stroke={c.color} />}
-        {weapon === "staff" && <><path d="M28 22l6-16" stroke={c.color} /><circle cx="34.6" cy="4.6" r="2.5" stroke={c.color} /></>}
-        {weapon === "whisk" && <><path d="M28 22l8-10" stroke={c.color} /><path d="M36 12l3-4M36 12l4-2M36 12l4 1.5" stroke={c.color} /></>}
-        {weapon === "fist" && <><path d="M28 22l7 1.5" stroke={c.color} /><circle cx="37" cy="24" r="2.6" stroke={c.color} /></>}
-        {weapon === "shield" && <><path d="M28 22l5 0.5" stroke={c.color} /><path d="M36 15.5l5.5 2v3.8c0 3.1-2.2 5-5.5 6.2-3.3-1.2-5.5-3.1-5.5-6.2v-3.8z" stroke={c.color} /></>}
-        {weapon === "bow" && <><path d="M30 8q7 6 0 22" stroke={c.color} /><path d="M30 8L30 30M27 13l6 4" stroke={c.color} /></>}
+    <svg className={"herofig vowfig" + (lit ? " herolit" : "")} width="46" height="52" viewBox="0 0 46 52" fill="none" stroke="#e8dcc3" strokeWidth="1.6" strokeLinecap="butt" strokeLinejoin="miter">
+      <g className={"vowshield" + (lit ? " vowlit" : "")} stroke={c.color} fill="none">
+        <path d="M23 5L40 15L40 35L23 45L6 35L6 15Z" strokeWidth={lit ? 1.6 : 1} opacity={lit ? 0.5 : 0.22} />
+        <path d="M40 15L40 35M6 15L6 35" strokeWidth={lit ? 2.6 : 1.7} opacity={lit ? 0.95 : 0.55} />
+      </g>
+      <g className="vowbody">
+        {stance !== "seated" && <path d="M5.5 48.4L40.5 48.4" strokeWidth="1.4" opacity="0.5" />}
+        {FIG_STANCE[stance]}
+        <path d={FIG_SIGIL[sigil]} stroke={c.color} strokeWidth="1.3" />
+        <path d={stance === "seated" ? "M17 30L29 30" : "M14.6 30.4L31.4 30.4"} stroke={c.color} strokeWidth="1.9" />
+        {FIG_CROWN[crown](c.color, lit)}
       </g>
     </svg>
   );
@@ -4398,7 +4477,7 @@ function App() {
             </>
           )}
           <div className="sceneline" />
-          <div className={"heroSpot" + (g.dead > 0 ? " fallen" : "") + (lowHp ? " lowfig" : "") + (g.cls === "vowkeeper" ? " vowstance" : "")}>
+          <div className={"heroSpot" + (g.dead > 0 ? " fallen" : "") + (lowHp ? " lowfig" : "") + ((FIG[g.cls] || [])[0] === "seated" ? " vowstance" : "")}>
             {g.buffs.shield > 0 && g.dead === 0 && (
               <div className="shieldarc" style={{ opacity: Math.min(0.9, 0.35 + (g.buffs.shield / Math.max(1, st.maxHp)) * 1.2) }} />
             )}
@@ -4953,6 +5032,20 @@ function App() {
             );
           })}
           <div className="classpassive">{cls.passive}</div>
+          <div className="sectionlabel" style={{ marginTop: 12 }}>The pace of your becoming</div>
+          <div className="tiny dim">
+            Hold your level and experience banks instead of spending itself. Useful when a realm's foes climb with you
+            and your gear has not yet caught up — nothing is lost, and the moment you release it every banked level lands at once.
+          </div>
+          <div className="focusrow" style={{ marginTop: 4 }}>
+            <button className={"chip" + (g.holdLevel ? " on" : "")} onClick={toggleHoldLevel}>
+              {g.holdLevel ? `⏸ holding at ${g.level}` : "let levels climb"}
+            </button>
+            <span className="mono tiny dim" style={{ alignSelf: "center" }}>
+              {fmt(g.xp)} / {fmt(xpNeed(g.level))} XP{g.holdLevel && g.xp >= xpNeed(g.level) ? " · a level waits" : ""}
+            </span>
+          </div>
+          <TabLog g={g} chan="skills" title="Training Record" empty="Nothing yet — training, mastery and weave changes land here." />
         </div>
       )}
 
@@ -5187,20 +5280,6 @@ function App() {
               ))
             )}
           </div>
-          <div className="sectionlabel" style={{ marginTop: 12 }}>The pace of your becoming</div>
-          <div className="tiny dim">
-            Hold your level and experience banks instead of spending itself. Useful when a realm's foes climb with you
-            and your gear has not yet caught up — nothing is lost, and the moment you release it every banked level lands at once.
-          </div>
-          <div className="focusrow" style={{ marginTop: 4 }}>
-            <button className={"chip" + (g.holdLevel ? " on" : "")} onClick={toggleHoldLevel}>
-              {g.holdLevel ? `⏸ holding at ${g.level}` : "let levels climb"}
-            </button>
-            <span className="mono tiny dim" style={{ alignSelf: "center" }}>
-              {fmt(g.xp)} / {fmt(xpNeed(g.level))} XP{g.holdLevel && g.xp >= xpNeed(g.level) ? " · a level waits" : ""}
-            </span>
-          </div>
-          <TabLog g={g} chan="skills" title="Training Record" empty="Nothing yet — training, mastery and weave changes land here." />
         </div>
       )}
 
@@ -5593,8 +5672,6 @@ const CSS = `
 .heroSpot { position: absolute; left: 10px; bottom: 3px; }
 .fighting .heroSpot { animation: lunge 0.6s ease-in-out infinite; }
 @keyframes lunge { 0%,100% { transform: translateX(0); } 35% { transform: translateX(7px); } }
-.fighting .armF { animation: swing 0.6s ease-in-out infinite; transform-origin: 18px 19px; }
-@keyframes swing { 0%,100% { transform: rotate(6deg); } 35% { transform: rotate(-16deg); } }
 /* the Vow: no advance, no swing — the stance settles and the sigils turn */
 /* the Vowkeeper does not advance, does not swing, and does not sway — the
    figure is dead still and the barrier alone reacts */
