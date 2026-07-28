@@ -1421,7 +1421,7 @@ function newGame(cls, name, race = "human", bg = "farmhand") {
     echoes: 0, rebirths: 0,
     vault: [], runes: {}, pendingUpgrades: [],
     rage: 0, chrono: 0, pet: null, minions: [], formation: "front", openSeen: ["weapon", "armor"], forgeLog: [],
-    ascension: 0, ascHigh: 0, ascCap: null, holdLevel: false, throneKills: 0, huntRank: ZONES.map(() => 0),
+    ascension: 0, ascHigh: 0, ascCap: null, holdLevel: false, coachOff: false, throneKills: 0, huntRank: ZONES.map(() => 0),
     loadoutIdx: 0, loadouts: [null, null, null],
     loadoutFocus: [null, null, null],
     savedAt: Date.now(),
@@ -3061,6 +3061,7 @@ function migrate(raw) {
   g.ascHigh = Math.max(g.ascension, raw.ascHigh | 0);
   g.ascCap = raw.ascCap == null ? null : Math.max(0, raw.ascCap | 0);
   g.holdLevel = !!raw.holdLevel;
+  g.coachOff = !!raw.coachOff;
   g.throneKills = Math.max(0, raw.throneKills | 0);
   g.huntRank = ZONES.map((_, i) => clamp((Array.isArray(raw.huntRank) ? raw.huntRank[i] : 0) | 0, 0, 10));
   g.pet = raw.pet && typeof raw.pet === "object" ? { hp: Math.max(0, Math.round(raw.pet.hp || 0)), downT: Math.max(0, raw.pet.downT || 0) } : null;
@@ -3277,6 +3278,36 @@ const FIG_SIGIL = {
   cross: "M22 24L24 24L24 26L26 26L26 28L24 28L24 30L22 30L22 28L20 28L20 26L22 26Z",
 };
 /* stance · crown · sigil per class — the whole roster on one page */
+/* ---------------- the first five minutes ----------------
+   Twenty classes, twenty bloodlines and eighteen past lives is 7,200 openings
+   for someone who has not played a minute yet. So every class now declares how
+   demanding it is to pilot, and names the lineage that flatters it, and a
+   newcomer can take a proven opening in one tap instead of guessing. */
+const CLASS_PATH = {
+  warrior:     { tier: 1, race: "bloodkin",    bg: "soldier",  why: "Strike, endure, repeat. Nothing to manage." },
+  ranger:      { tier: 1, race: "moonchild",   bg: "hermit",   why: "High crit, simple rotation, safe at range." },
+  samurai:     { tier: 1, race: "moonchild",   bg: "veteran",  why: "Big clean hits; the first blow always crits." },
+  mage:        { tier: 1, race: "emberkin",    bg: "pyre",     why: "Point at things until they stop moving." },
+  monk:        { tier: 1, race: "bloodkin",    bg: "pilgrim",  why: "Fast, forgiving, heals itself." },
+  sentinel:    { tier: 2, race: "stoneborn",   bg: "soldier",  why: "Shields carry the fight — slow but very hard to kill." },
+  berserker:   { tier: 2, race: "bloodkin",    bg: "outcast",  why: "Lives near death on purpose. Thrilling, risky." },
+  blademaster: { tier: 2, race: "windborn",    bg: "veteran",  why: "Two blades, more strikes, more decisions." },
+  shadow:      { tier: 2, race: "emberkin",    bg: "deserter", why: "Poisons and burns — damage arrives late." },
+  cleric:      { tier: 2, race: "dragonblood", bg: "pilgrim",  why: "Sustains through anything, kills slowly." },
+  druid:       { tier: 2, race: "seafolk",     bg: "farmhand", why: "Regenerates constantly; rewards patience." },
+  taoist:      { tier: 2, race: "starborn",    bg: "scholar",  why: "Balanced caster with a wide toolkit." },
+  warlock:     { tier: 2, race: "emberkin",    bg: "pyre",     why: "Enormous damage, paper-thin body." },
+  stormcaller: { tier: 2, race: "stormtouched", bg: "rod",     why: "Chain lightning across whole packs." },
+  spellblade:  { tier: 2, race: "windborn",    bg: "scholar",  why: "Blade and spell woven together." },
+  ravager:     { tier: 3, race: "terraborn",   bg: "quarry",   why: "Spend rage at the right moment or waste it." },
+  beastcaller: { tier: 3, race: "voidborn",    bg: "farmhand", why: "Keep a companion alive and positioned." },
+  necromancer: { tier: 3, race: "voidborn",    bg: "hermit",   why: "Raise and feed a rotting pack of three." },
+  chronomancer:{ tier: 3, race: "moonchild",   bg: "scholar",  why: "Timing and cooldown play; unforgiving." },
+  vowkeeper:   { tier: 3, race: "stoneborn",   bg: "quarry",   why: "Never strikes. Damage comes from being hit." },
+};
+const PATH_TIER = ["", "Straightforward", "Involved", "Intricate"];
+const PATH_TIER_C = ["", "#6fb98f", "#c8a45f", "#c8452c"];
+
 const FIG = {
   warrior:     ["planted", "helm",   "bar"],
   sentinel:    ["planted", "helm",   "square"],
@@ -3343,6 +3374,34 @@ function ThrallFig() {
       <path d="M11 10v8M11 13l-4.5 3M11 13l4.5 2.5M11 18l-3.5 8M11 18l3.5 8" />
       <path d="M6 15.5l-2 .5M16 15Q17.5 14 18 12.5" strokeWidth="1.2" opacity="0.7" />
     </svg>
+  );
+}
+
+function nextStep(g) {
+  if (g.dead > 0) return null;
+  const trainable = SKILLS.filter((s) => s.cls === g.cls && s.lv <= g.level && !g.trained.includes(s.id));
+  const cap = (g.level >= 50 ? 4 : 3) + (g.cls === "beastcaller" ? 1 : 0);
+  if (!g.trained.length) return { tab: "skills", text: "Camp, then train your first skill — Training tab.", why: "Skills only train while you rest at camp." };
+  if (g.skillsOn.length < Math.min(cap, g.trained.length)) return { tab: "skills", text: "Weave a trained skill so it casts in battle — Training tab.", why: "A trained skill does nothing until it is woven." };
+  if (g.inv.length) return { tab: "gear", text: `${g.inv.length} item${g.inv.length > 1 ? "s" : ""} waiting in your pack — Gear tab.`, why: "Equip what beats what you wear; sell the rest." };
+  if (trainable.length && !g.training) return { tab: "skills", text: `${trainable[0].name} is ready to learn — Training tab.`, why: "Training runs while you camp." };
+  if (g.level >= 6 && !(g.forgeLog || []).length) return { tab: "forge", text: "Visit the Forge — tempering makes worn gear stronger.", why: "Every piece can be honed five times." };
+  if (g.level >= 10 && g.maxZone === 0) return { tab: "zones", text: "Fell the realm boss to open the next road — Realms tab.", why: "Each realm holds better spoils than the last." };
+  return null;
+}
+
+function Coach({ g, onGo, onHide }) {
+  const step = nextStep(g);
+  if (!step) return null;
+  return (
+    <div className="coach">
+      <div className="coachbody">
+        <div className="coachtext">{step.text}</div>
+        <div className="coachwhy tiny dim">{step.why}</div>
+      </div>
+      <button className="btn tiny" onClick={() => onGo(step.tab)}>Take me</button>
+      <button className="coachx" onClick={onHide} aria-label="hide">×</button>
+    </div>
   );
 }
 
@@ -3494,16 +3553,28 @@ function App() {
     return () => clearInterval(iv);
   }, [phase]);
 
-  const start = () => {
-    const g = newGame(pickCls, heroName.trim(), pickRace, pickBg);
+  const quickStart = () => {
+    const key = pick(Object.keys(CLASS_PATH).filter((k) => CLASS_PATH[k].tier === 1));
+    const P = CLASS_PATH[key];
+    setPickCls(key); setPickRace(P.race); setPickBg(P.bg);
+    start(key, P.race, P.bg);
+  };
+  const suggestForClass = () => {
+    const P = CLASS_PATH[pickCls];
+    if (P) { setPickRace(P.race); setPickBg(P.bg); }
+  };
+
+  const start = (ovCls, ovRace, ovBg) => {
+    const useCls = ovCls || pickCls, useRace = ovRace || pickRace, useBg = ovBg || pickBg;
+    const g = newGame(useCls, heroName.trim(), useRace, useBg);
     g.echoes = carry.echoes || 0;
     g.rebirths = carry.rebirths || 0;
-    if (pickBg === "orphan") {
-      const s0 = SKILLS.find((s2) => s2.cls === pickCls && s2.lv === 3);
+    if (useBg === "orphan") {
+      const s0 = SKILLS.find((s2) => s2.cls === useCls && s2.lv === 3);
       if (s0) { g.trained = [s0.id]; g.skillsOn = [s0.id]; pushLog(g, `Temple drills endure: ${s0.name} is already yours.`, "buff"); }
     }
-    if (pickBg === "smith") g.materials.glyph = 3;
-    if (pickBg === "pyre") g.essence = 5;
+    if (useBg === "smith") g.materials.glyph = 3;
+    if (useBg === "pyre") g.essence = 5;
     if (g.echoes > 0) {
       pushLog(g, `Echoes of ${g.rebirths} past ${g.rebirths > 1 ? "lives" : "life"} hum within you: +${g.echoes}% XP & gold, +${(g.echoes * 0.5).toFixed(0)}% stats.`, "buff");
     }
@@ -3844,6 +3915,8 @@ function App() {
       pushLog(g, `The metal is raised: ${it.name} is reforged to tier ${nit.tier}.`, "lvl");
       return g;
     });
+
+  const hideCoach = () => mutate((g) => { g.coachOff = true; return g; });
 
   const toggleHoldLevel = () =>
     mutate((g) => {
@@ -4273,12 +4346,21 @@ function App() {
           <div className="eyebrow">A personal edition · no ads · no paywalls · nothing tracked</div>
           <h1 className="gametitle">Warriors &amp; Adventure</h1>
           <div className="subtitle">Reforged</div>
+          <div className="whatisit tiny">
+            An idle RPG: your hero fights on their own, beat by beat. You decide what they wear,
+            what they learn and where they hunt — then watch it play out. It keeps running while you're away.
+          </div>
           {carry.echoes > 0 && (
             <div className="echobanner mono tiny">
               回响 {carry.echoes} Echoes await your next life · +{carry.echoes}% XP &amp; gold · +{(carry.echoes * 0.5).toFixed(0)}% stats
             </div>
           )}
         </div>
+        <div className="quickrow">
+          <button className="btn primary" onClick={quickStart}>Just start — pick a proven hero for me</button>
+          <span className="tiny dim">or choose below · nothing here is permanent, you can begin again any time</span>
+        </div>
+        <div className="sectionlabel">Choose a school — <span className="tiny dim">the badge says how much it asks of you</span></div>
         <div className="selectgrid">
           {Object.entries(CLASSES).map(([key, c]) => (
             <button
@@ -4289,13 +4371,26 @@ function App() {
             >
               <Seal char={c.seal} color={c.color} size={52} />
               <div className="classname" style={{ color: c.color }}>{c.name}</div>
+              {CLASS_PATH[key] && (
+                <div className="pathtag mono" style={{ color: PATH_TIER_C[CLASS_PATH[key].tier], borderColor: PATH_TIER_C[CLASS_PATH[key].tier] }}>
+                  {"●".repeat(CLASS_PATH[key].tier)} {PATH_TIER[CLASS_PATH[key].tier]}
+                </div>
+              )}
               <div className="classblurb">{c.blurb}</div>
+              {CLASS_PATH[key] && <div className="pathwhy tiny">{CLASS_PATH[key].why}</div>}
               <div className="classpassive">{c.passive}</div>
               <div className="classstats mono">HP {c.hp} · ATK {c.atk} · DEF {c.def} · CRIT {c.crit}%</div>
             </button>
           ))}
         </div>
-        <div className="sectionlabel" style={{ marginTop: 14 }}>Bloodline</div>
+        <div className="pickhint">
+          <span className="tiny">
+            {CLASSES[pickCls].name}s do well with <b style={{ color: RACES[CLASS_PATH[pickCls].race].color }}>{RACES[CLASS_PATH[pickCls].race].name}</b> blood
+            and a <b>{BACKGROUNDS[CLASS_PATH[pickCls].bg].name}</b> past.
+          </span>
+          <button className="btn tiny" onClick={suggestForClass}>Use that pairing</button>
+        </div>
+        <div className="sectionlabel" style={{ marginTop: 14 }}>Bloodline <span className="tiny dim">— the body you were born with</span></div>
         <div className="chiprow">
           {Object.entries(RACES).map(([k, r]) => (
             <button
@@ -4310,7 +4405,7 @@ function App() {
         </div>
         <div className="pickblurb tiny dim">{RACES[pickRace].blurb} · {RACES[pickRace].modText}</div>
 
-        <div className="sectionlabel" style={{ marginTop: 10 }}>Past life</div>
+        <div className="sectionlabel" style={{ marginTop: 10 }}>Past life <span className="tiny dim">— what you did before this one</span></div>
         <div className="chiprow">
           {Object.entries(BACKGROUNDS).map(([k, b]) => (
             <button
@@ -4332,7 +4427,7 @@ function App() {
             value={heroName}
             onChange={(e) => setHeroName(e.target.value)}
           />
-          <button className="btn primary" onClick={start}>Begin</button>
+          <button className="btn primary" onClick={() => start()}>Begin</button>
         </div>
         <div className="seedimport">
           <div className="sectionlabel">Or plant a hero seed</div>
@@ -4724,6 +4819,7 @@ function App() {
 
       {tab === "battle" && (
         <div className="pane">
+          {!g.coachOff && g.level < 14 && <Coach g={g} onGo={setTab} onHide={hideCoach} />}
           <button className={"btn campbtn" + (g.camping ? " camped" : "")} onClick={toggleCamp}>
             {g.camping ? "Break camp — return to the hunt" : "Set up camp — rest, sleep, and train"}
           </button>
@@ -5739,6 +5835,22 @@ const CSS = `
 }
 @keyframes beastbob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 .beastfloats { top: -4px; }
+.whatisit { color: ${C.dim}; max-width: 34em; margin: 8px auto 0; line-height: 1.5; }
+.quickrow { display: flex; flex-direction: column; align-items: center; gap: 5px; margin: 14px 0 10px; }
+.quickrow .btn.primary { width: 100%; max-width: 22em; }
+.pathtag { display: inline-block; font-size: 9px; border: 1px solid; border-radius: 3px;
+  padding: 0 4px; margin: 3px 0 2px; letter-spacing: 0.04em; }
+.pathwhy { color: #8b93a7; margin-top: 3px; line-height: 1.4; }
+.pickhint { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: #12141c; border: 1px solid #2a2f3d; border-radius: 4px; padding: 7px 9px; margin-top: 12px; }
+.coach { display: flex; align-items: center; gap: 8px; background: #14181f;
+  border: 1px solid ${C.gilt}55; border-left: 3px solid ${C.gilt}; border-radius: 4px;
+  padding: 8px 10px; margin-bottom: 8px; position: relative; }
+.coachbody { flex: 1; min-width: 0; }
+.coachtext { font-size: 12.5px; color: ${C.bone}; line-height: 1.35; }
+.coachwhy { margin-top: 2px; }
+.coachx { position: absolute; top: 2px; right: 5px; background: none; border: none;
+  color: ${C.dim}; font-size: 14px; cursor: pointer; padding: 0 3px; }
 .forgelog { max-height: 168px; overflow-y: auto; background: #10121a; border: 1px solid #2a2f3d;
   border-radius: 4px; padding: 7px 9px; display: flex; flex-direction: column; gap: 3px; }
 .forgeline { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; line-height: 1.45;
